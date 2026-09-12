@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: shooter
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server/server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
