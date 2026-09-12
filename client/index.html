@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shooter — 3D FPS 팀 데스매치</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="game-canvas"></div>
+
+  <!-- ==================== 로비 ==================== -->
+  <div id="lobby" class="overlay">
+    <div class="lobby-box">
+      <h1>🎯 SHOOTER</h1>
+      <p class="sub">3D FPS 팀 데스매치</p>
+
+      <div class="lobby-row">
+        <input id="nickname" maxlength="16" placeholder="닉네임" autocomplete="off" />
+      </div>
+      <div class="lobby-actions">
+        <button id="btn-create" class="btn primary">방 만들기</button>
+      </div>
+      <div class="lobby-divider">— 또는 —</div>
+      <div class="lobby-row">
+        <input id="join-code" maxlength="6" placeholder="방 코드 (예: ABC123)" autocomplete="off" />
+      </div>
+      <div class="lobby-actions">
+        <button id="btn-join" class="btn">방 참여하기</button>
+      </div>
+
+      <div id="lobby-status" class="status"></div>
+
+      <div id="lobby-room" class="hidden">
+        <div class="room-code-label">방 코드</div>
+        <div id="room-code" class="room-code"></div>
+        <div class="lobby-note">코드를 친구에게 공유하세요.<br />조작: WASD 이동 · Shift 달리기 · 마우스 조준 · LMB 사격 · R 재장전 · 1/2/3 무기</div>
+        <div id="player-list" class="player-list"></div>
+        <button id="btn-start" class="btn primary big hidden">게임 시작</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 일시정지(포인터 재조준) ==================== -->
+  <div id="pause" class="overlay paused hidden">
+    <div class="pause-box">
+      <p>클릭해서 조준 모드로 돌아가기</p>
+    </div>
+  </div>
+
+  <!-- ==================== HUD ==================== -->
+  <div id="hud" class="hidden">
+    <div id="crosshair"><div class="dot"></div></div>
+
+    <div id="scoreboard">
+      <span id="score-red" class="team red">0</span>
+      <span id="score-dash">:</span>
+      <span id="score-blue" class="team blue">0</span>
+      <span id="timer">--:--</span>
+    </div>
+
+    <div id="my-team-tag"></div>
+
+    <div id="healthbar-wrap">
+      <div class="label">HP</div>
+      <div id="healthbar"><div id="healthfill"></div></div>
+    </div>
+    <div id="kd">0/0</div>
+
+    <div id="weapon-hud">
+      <div id="weapon-name">AR</div>
+      <div id="ammo">30 / ∞</div>
+    </div>
+
+    <div id="killfeed"></div>
+
+    <div id="hitmarker" class="hidden">✕</div>
+    <div id="damage-vignette"></div>
+  </div>
+
+  <!-- ==================== 사망 / 종료 ==================== -->
+  <div id="death-screen" class="overlay death hidden">
+    <div class="death-box">
+      <p class="big">전사했습니다</p>
+      <p class="small">잠시 후 부활합니다…</p>
+    </div>
+  </div>
+
+  <div id="end-screen" class="overlay end hidden">
+    <div class="end-box">
+      <h2 id="end-title"></h2>
+      <div id="end-score"></div>
+      <button id="btn-back-lobby" class="btn primary big">로비로 돌아가기</button>
+    </div>
+  </div>
+
+  <script src="/vendor/socket.io/client-dist/socket.io.min.js"></script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

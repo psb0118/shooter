@@ -1,0 +1,20 @@
+{
+  "name": "shooter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "3D FPS 팀 데스매치 (브라우저 멀티플레이 슈팅 게임)",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js",
+    "test": "node scripts/test-game.js && node scripts/test-socket.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "three": "^0.174.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.3"
+  }
+}

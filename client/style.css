@@ -1,0 +1,131 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; color: #e8ecf4; user-select: none; }
+
+#game-canvas { position: fixed; inset: 0; }
+#game-canvas canvas { display: block; }
+
+.hidden { display: none !important; }
+
+.overlay { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; background: rgba(6, 8, 14, 0.6); }
+.overlay.paused { background: rgba(6, 8, 14, 0.45); pointer-events: auto; cursor: pointer; z-index: 15; }
+.overlay.death { background: rgba(60, 0, 0, 0.35); pointer-events: none; }
+.overlay.end { background: rgba(6, 8, 14, 0.8); z-index: 30; }
+
+/* ==================== 로비 ==================== */
+.lobby-box {
+  width: 380px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
+  background: #141926; border: 1px solid #2a3242; border-radius: 14px;
+  padding: 28px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+}
+.lobby-box h1 { font-size: 30px; text-align: center; letter-spacing: 4px; }
+.lobby-box .sub { text-align: center; color: #7c8698; margin: 6px 0 22px; font-size: 13px; }
+.lobby-row { margin-bottom: 10px; }
+.lobby-row input {
+  width: 100%; padding: 11px 13px; border-radius: 8px; border: 1px solid #2a3242;
+  background: #0d1119; color: #e8ecf4; font-size: 15px; outline: none;
+}
+.lobby-row input:focus { border-color: #4a7cff; }
+.lobby-actions { display: flex; gap: 8px; }
+.lobby-divider { text-align: center; color: #5b6474; margin: 14px 0; font-size: 13px; }
+
+.btn {
+  flex: 1; padding: 11px 0; border: 1px solid #2a3242; border-radius: 8px;
+  background: #1c2333; color: #dfe5f0; font-size: 15px; cursor: pointer; transition: background .15s;
+}
+.btn:hover { background: #27314a; }
+.btn.primary { background: #2f5ef0; border-color: #2f5ef0; color: #fff; font-weight: 600; }
+.btn.primary:hover { background: #4371f7; }
+.btn.big { width: 100%; padding: 13px 0; font-size: 16px; margin-top: 14px; }
+
+.status { margin-top: 12px; min-height: 18px; text-align: center; color: #ff7a7a; font-size: 13px; }
+#lobby-room { margin-top: 18px; border-top: 1px solid #222a3a; padding-top: 16px; text-align: center; }
+.room-code-label { color: #7c8698; font-size: 12px; }
+.room-code { font-size: 26px; font-weight: 700; letter-spacing: 6px; color: #5fd1ff; margin: 4px 0 10px; }
+.lobby-note { font-size: 12px; color: #7c8698; line-height: 1.6; margin-bottom: 12px; }
+
+.player-list { text-align: left; margin-top: 6px; max-height: 220px; overflow-y: auto; }
+.player-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 4px;
+  background: #0d1119; border-radius: 8px; font-size: 14px;
+}
+.player-item .pdot { width: 10px; height: 10px; border-radius: 50%; }
+.player-item .pdot.red { background: #e84c4c; box-shadow: 0 0 6px #e84c4c; }
+.player-item .pdot.blue { background: #4c8bee; box-shadow: 0 0 6px #4c8bee; }
+.player-item .pname { flex: 1; }
+.player-item .phost { color: #ffd75f; font-size: 11px; }
+
+/* ==================== HUD ==================== */
+#hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+
+#crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+#crosshair .dot {
+  width: 6px; height: 6px; background: #fff; border-radius: 50%;
+  box-shadow: 0 0 4px rgba(255,255,255,.9);
+}
+
+#scoreboard {
+  position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 14px; font-weight: 700;
+  background: rgba(13, 17, 25, 0.55); padding: 8px 16px; border-radius: 20px; font-size: 20px;
+}
+#scoreboard .team.red { color: #ff6b6b; }
+#scoreboard .team.blue { color: #6ba6ff; }
+#score-dash { color: #5b6474; }
+#timer { font-size: 14px; color: #dfe5f0; border-left: 1px solid #2a3242; padding-left: 14px; font-weight: 400; }
+
+#my-team-tag {
+  position: absolute; top: 18px; left: 18px; font-size: 13px; font-weight: 700;
+  padding: 5px 12px; border-radius: 14px; background: rgba(13,17,25,.6);
+}
+#my-team-tag.red { color: #ff6b6b; border: 1px solid #ff6b6b55; }
+#my-team-tag.blue { color: #6ba6ff; border: 1px solid #6ba6ff55; }
+
+#healthbar-wrap { position: absolute; left: 18px; bottom: 20px; width: 240px; }
+#healthbar-wrap .label { font-size: 12px; color: #7c8698; margin-bottom: 4px; }
+#healthbar { height: 16px; background: #0d1119; border: 1px solid #2a3242; border-radius: 8px; overflow: hidden; }
+#healthfill { height: 100%; width: 100%; background: linear-gradient(#4ade80, #22c55e); transition: width .2s; }
+
+#kd { position: absolute; left: 18px; bottom: 48px; font-size: 13px; color: #9aa5b5; }
+
+#weapon-hud {
+  position: absolute; right: 20px; bottom: 20px; text-align: right;
+  background: rgba(13,17,25,.6); padding: 10px 16px; border-radius: 10px; min-width: 120px;
+}
+#weapon-name { font-size: 15px; font-weight: 700; color: #dfe5f0; }
+#ammo { font-size: 18px; font-weight: 700; color: #ffd75f; margin-top: 3px; }
+#ammo.low { color: #ff5f5f; }
+
+#hitmarker {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font-size: 28px; color: #ff4d4d; font-weight: 700; text-shadow: 0 0 8px #ff0000aa;
+}
+#damage-vignette {
+  position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(255,0,0,0) 40%, rgba(150,0,0,.35) 100%);
+  opacity: 0; transition: opacity .18s;
+}
+
+#killfeed {
+  position: absolute; top: 70px; right: 18px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+}
+.kill-item {
+  background: rgba(13,17,25,.6); padding: 4px 10px; border-radius: 6px; font-size: 13px; animation: feedin .2s ease-out;
+}
+.kill-item .killer { font-weight: 700; }
+.kill-item .killer.red { color: #ff6b6b; }
+.kill-item .killer.blue { color: #6ba6ff; }
+.kill-item .victim { color: #c3cad8; }
+.kill-item .hs { color: #ffd75f; margin-left: 4px; font-size: 11px; }
+@keyframes feedin { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ==================== 일시정지/사망/종료 ==================== */
+.pause-box p, .death-box .big { font-size: 22px; font-weight: 700; }
+.death-box { text-align: center; }
+.death-box .small { margin-top: 8px; color: #c3cad8; }
+
+.end-box {
+  background: #141926; border: 1px solid #2a3242; border-radius: 14px; padding: 36px 42px;
+  text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+}
+.end-box h2 { font-size: 30px; margin-bottom: 10px; }
+#end-score { font-size: 22px; color: #9aa5b5; margin-bottom: 6px; }
