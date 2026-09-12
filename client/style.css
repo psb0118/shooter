@@ -129,3 +129,37 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 }
 .end-box h2 { font-size: 30px; margin-bottom: 10px; }
 #end-score { font-size: 22px; color: #9aa5b5; margin-bottom: 6px; }
+
+/* ==================== 모바일 터치 컨트롤 ==================== */
+html, body { touch-action: none; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+#game-canvas { touch-action: none; }
+
+#touch-controls { position: fixed; inset: 0; z-index: 11; pointer-events: none; touch-action: none; }
+#touch-controls.hidden { display: none; }
+
+.btn-control {
+  position: absolute; display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; pointer-events: auto; touch-action: none; user-select: none;
+  border: 2px solid rgba(255,255,255,.35); color: #fff;
+  background: rgba(255,255,255,.10); font-size: 24px;
+}
+.btn-control:active { background: rgba(255,255,255,.3); }
+
+#btn-fire {
+  right: 26px; bottom: 42px; width: 78px; height: 78px; font-size: 34px;
+  background: rgba(255,80,80,.28);
+}
+#btn-fire.active { background: rgba(255,80,80,.85); }
+#btn-reload { right: 30px; bottom: 134px; width: 52px; height: 52px; font-size: 22px; }
+#btn-swap { right: 110px; bottom: 56px; width: 52px; height: 52px; font-size: 22px; }
+
+#joy-base {
+  position: absolute; left: 30px; bottom: 34px; width: 108px; height: 108px; border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.4); background: rgba(255,255,255,.10);
+  pointer-events: auto; touch-action: none;
+}
+#joy-knob {
+  position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+  border-radius: 50%; background: rgba(255,255,255,.55); box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  transform: translate(0, 0); will-change: transform;
+}

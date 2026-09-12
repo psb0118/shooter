@@ -27,6 +27,8 @@ const TEAM_COLOR = { red: 0xe84c4c, blue: 0x4c8bee };
 const socket = io();
 const $ = (sel) => document.querySelector(sel);
 
+const TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+
 const HOME_TEAM = { red: "RED", blue: "BLUE" };
 
 const state = {
@@ -341,12 +343,17 @@ document.addEventListener("mousemove", (e) => {
 });
 
 window.addEventListener("keydown", (e) => {
+  if (!TOUCH && state.inGame) $("#pause").classList.add("hidden");
   switch (e.code) {
     case "KeyW": state.keys.w = true; break;
     case "KeyA": state.keys.a = true; break;
     case "KeyS": state.keys.s = true; break;
     case "KeyD": state.keys.d = true; break;
     case "ShiftLeft": case "ShiftRight": state.keys.shift = true; break;
+    case "ArrowLeft": state.keys.arrowL = true; break;
+    case "ArrowRight": state.keys.arrowR = true; break;
+    case "ArrowUp": state.keys.arrowU = true; break;
+    case "ArrowDown": state.keys.arrowD = true; break;
     case "KeyR":
       state.myReloading = true;
       socket.emit("game:reload");
@@ -364,6 +371,10 @@ window.addEventListener("keyup", (e) => {
     case "KeyS": state.keys.s = false; break;
     case "KeyD": state.keys.d = false; break;
     case "ShiftLeft": case "ShiftRight": state.keys.shift = false; break;
+    case "ArrowLeft": state.keys.arrowL = false; break;
+    case "ArrowRight": state.keys.arrowR = false; break;
+    case "ArrowUp": state.keys.arrowU = false; break;
+    case "ArrowDown": state.keys.arrowD = false; break;
   }
 });
 
@@ -374,8 +385,14 @@ function switchWeapon(id) {
   Sfx.switchW();
 }
 
+function cycleWeapon() {
+  const order = ["smg", "ar", "sr"];
+  const cur = order.indexOf(state.myWeapon);
+  switchWeapon(order[(cur + 1) % order.length]);
+}
+
 renderer.domElement.addEventListener("mousedown", (e) => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || TOUCH) return;
   if (!state.inGame) return;
   if (document.pointerLockElement !== renderer.domElement) {
     renderer.domElement.requestPointerLock();
@@ -384,23 +401,142 @@ renderer.domElement.addEventListener("mousedown", (e) => {
   state.firing = true;
 });
 window.addEventListener("mouseup", (e) => {
-  if (e.button === 0) state.firing = false;
+  if (e.button === 0 && !TOUCH) state.firing = false;
 });
 
 document.addEventListener("pointerlockchange", () => {
+  if (TOUCH) return;
   const locked = document.pointerLockElement === renderer.domElement;
   $("#pause").classList.toggle("hidden", locked || !state.inGame);
   if (!locked) state.firing = false;
 });
 
 renderer.domElement.addEventListener("pointerlockerror", () => {
-  if (state.inGame) $("#pause").classList.remove("hidden");
+  if (TOUCH || !state.inGame) return;
+  $("#pause").classList.remove("hidden");
 });
 
 // 일시정지 오버레이 클릭 = 조준 재개
 $("#pause").addEventListener("click", () => {
-  if (state.inGame) renderer.domElement.requestPointerLock();
+  if (state.inGame && !TOUCH) renderer.domElement.requestPointerLock();
 });
+
+/* =========================================================
+   모바일 터치 컨트롤 (가상 조이스틱 + 시야 드래그 + 버튼)
+========================================================= */
+
+const JOY_R = 44;
+const TOUCH_SENS = 0.006;
+const joy = { active: false, id: -1, ox: 0, oy: 0 };
+const lookDrag = new Map();  // touchId -> {x, y}
+const btnHold = new Map();   // touchId -> element id
+
+function isCtrlTarget(t) {
+  return t.target && t.target.closest ? t.target.closest("#joy-base, .btn-control") : null;
+}
+
+function resetJoy() {
+  joy.active = false; joy.id = -1;
+  state.keys.w = state.keys.a = state.keys.s = state.keys.d = state.keys.shift = false;
+  $("#joy-knob").style.transform = "translate(0px, 0px)";
+}
+
+function updateJoyTouch(t) {
+  const dx = t.clientX - joy.ox;
+  const dy = t.clientY - joy.oy;
+  const len = Math.hypot(dx, dy);
+  const cl = Math.min(len, JOY_R);
+  const ux = len > 0 ? dx / len : 0;
+  const uy = len > 0 ? dy / len : 0;
+  let nx = ux * cl, ny = uy * cl;
+  $("#joy-knob").style.transform = `translate(${nx}px, ${ny}px)`;
+
+  const ax = len < 10 ? 0 : nx / JOY_R;
+  const ay = len < 10 ? 0 : ny / JOY_R;
+  const dead = 0.35;
+  state.keys.a = ax < -dead;
+  state.keys.d = ax > dead;
+  state.keys.w = ay < -dead;
+  state.keys.s = ay > dead;
+  state.keys.shift = len > JOY_R * 0.8;
+}
+
+document.addEventListener("touchstart", (e) => {
+  if (!state.inGame) return;
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const ctrl = isCtrlTarget(t);
+    if (ctrl && ctrl.id === "joy-base") {
+      if (joy.active) continue;
+      joy.active = true; joy.id = t.identifier;
+      joy.ox = t.clientX; joy.oy = t.clientY;
+      $("#joy-knob").style.transform = "translate(0px, 0px)";
+    } else if (ctrl && ctrl.classList.contains("btn-control")) {
+      btnHold.set(t.identifier, ctrl.id);
+      if (ctrl.id === "btn-fire") {
+        state.firing = true;
+        ctrl.classList.add("active");
+      } else if (ctrl.id === "btn-reload") {
+        ctrl.classList.add("active");
+        state.myReloading = true;
+        socket.emit("game:reload");
+        Sfx.reload();
+      } else if (ctrl.id === "btn-swap") {
+        ctrl.classList.add("active");
+        cycleWeapon();
+      }
+    } else {
+      lookDrag.set(t.identifier, { x: t.clientX, y: t.clientY });
+    }
+  }
+}, { passive: false });
+
+document.addEventListener("touchmove", (e) => {
+  if (!state.inGame) return;
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    if (joy.active && t.identifier === joy.id) {
+      updateJoyTouch(t);
+      continue;
+    }
+    if (btnHold.has(t.identifier)) continue;
+    const prev = lookDrag.get(t.identifier);
+    if (prev) {
+      const dx = t.clientX - prev.x;
+      const dy = t.clientY - prev.y;
+      prev.x = t.clientX; prev.y = t.clientY;
+      state.myPred.yaw += dx * TOUCH_SENS;
+      state.myPred.pitch = Math.max(-1.52, Math.min(1.52, state.myPred.pitch - dy * TOUCH_SENS));
+      if (Math.abs(dx) > 0.5) state.myPred.yaw = ((state.myPred.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    } else {
+      lookDrag.set(t.identifier, { x: t.clientX, y: t.clientY });
+    }
+  }
+}, { passive: false });
+
+document.addEventListener("touchend", (e) => {
+  for (const t of e.changedTouches) {
+    if (joy.active && t.identifier === joy.id) resetJoy();
+    if (btnHold.has(t.identifier)) {
+      const id = btnHold.get(t.identifier);
+      btnHold.delete(t.identifier);
+      const el = document.getElementById(id);
+      if (el) el.classList.remove("active");
+      if (id === "btn-fire") state.firing = false;
+    }
+    lookDrag.delete(t.identifier);
+  }
+});
+document.addEventListener("touchcancel", (e) => {
+  for (const t of e.changedTouches) {
+    if (joy.active && t.identifier === joy.id) resetJoy();
+    btnHold.delete(t.identifier);
+    lookDrag.delete(t.identifier);
+  }
+  state.firing = false;
+  document.querySelectorAll(".btn-control.active").forEach((el) => el.classList.remove("active"));
+});
+document.addEventListener("touchstart", () => Sfx.unlock(), { once: true });
 
 /* =========================================================
    사운드 (WebAudio 합성)
@@ -561,6 +697,7 @@ function enterLobby(room) {
   $("#hud").classList.add("hidden");
   $("#end-screen").classList.add("hidden");
   $("#death-screen").classList.add("hidden");
+  $("#touch-controls").classList.add("hidden");
   $("#lobby").classList.remove("hidden");
   state.myTeam = room.players.find(p => p.socketId === socket.id)?.team || null;
   renderLobby(room);
@@ -620,7 +757,8 @@ socket.on("game:sync", (d) => {
   $("#death-screen").classList.add("hidden");
   $("#hud").classList.remove("hidden");
   $("#killfeed").innerHTML = "";
-  renderer.domElement.requestPointerLock();
+  $("#touch-controls").classList.toggle("hidden", !TOUCH);
+  if (!TOUCH) renderer.domElement.requestPointerLock();
   Sfx.unlock();
 });
 
@@ -648,14 +786,13 @@ socket.on("game:started", (d) => {
   }
 
   buildWorld(d.map);
-
   $("#lobby").classList.add("hidden");
   $("#end-screen").classList.add("hidden");
   $("#death-screen").classList.add("hidden");
   $("#hud").classList.remove("hidden");
   $("#killfeed").innerHTML = "";
-
-  renderer.domElement.requestPointerLock();
+  $("#touch-controls").classList.toggle("hidden", !TOUCH);
+  if (!TOUCH) renderer.domElement.requestPointerLock();
   Sfx.unlock();
 });
 
@@ -791,6 +928,7 @@ socket.on("game:ended", (d) => {
   if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
   $("#death-screen").classList.add("hidden");
   $("#hud").classList.add("hidden");
+  $("#touch-controls").classList.add("hidden");
   $("#end-screen").classList.remove("hidden");
   $("#end-title").textContent =
     d.winner === "draw" ? "무승부" :
@@ -811,9 +949,24 @@ function animate(now) {
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
 
-  if (state.inGame && state.myAlive && document.pointerLockElement === renderer.domElement) {
-    // 자기 예측 이동
-    predictStep(state.myPred, state.keys, dt);
+  if (state.inGame && state.myAlive) {
+    const controllable = TOUCH || document.pointerLockElement === renderer.domElement;
+    const anyMove = state.keys.w || state.keys.a || state.keys.s || state.keys.d ||
+                    state.keys.arrowL || state.keys.arrowR || state.keys.arrowU || state.keys.arrowD;
+
+    // 자기 예측 이동 (포인터 락 없이도 키 입력이 있으면 동작 — 데스크톱 폴백)
+    if (controllable || anyMove) {
+      predictStep(state.myPred, state.keys, dt);
+    }
+
+    // 포인터 락이 잡히지 않은 데스크톱 → 방향키로 시야 회전
+    if (!TOUCH && document.pointerLockElement !== renderer.domElement) {
+      const kv = 2.2 * dt;
+      if (state.keys.arrowL) state.myPred.yaw += kv;
+      if (state.keys.arrowR) state.myPred.yaw -= kv;
+      if (state.keys.arrowU) state.myPred.pitch = Math.max(-1.52, state.myPred.pitch + kv * 0.7);
+      if (state.keys.arrowD) state.myPred.pitch = Math.min(1.52, state.myPred.pitch - kv * 0.7);
+    }
 
     // 카메라 배치
     const cx = state.myPred.x;

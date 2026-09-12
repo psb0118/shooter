@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Shooter — 3D FPS 팀 데스매치</title>
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -34,7 +34,7 @@
       <div id="lobby-room" class="hidden">
         <div class="room-code-label">방 코드</div>
         <div id="room-code" class="room-code"></div>
-        <div class="lobby-note">코드를 친구에게 공유하세요.<br />조작: WASD 이동 · Shift 달리기 · 마우스 조준 · LMB 사격 · R 재장전 · 1/2/3 무기</div>
+        <div class="lobby-note">코드를 친구에게 공유하세요.<br />PC: WASD 이동 · Shift 달리기 · 마우스 조준(클릭) · LMB 사격 · R 재장전 · 1/2/3 무기<br />모바일: 왼쪽 조이스틱 이동 · 오른쪽 드래그 조준 · 🔫 발사 · ↻ 재장전 · ⚔️ 무기</div>
         <div id="player-list" class="player-list"></div>
         <button id="btn-start" class="btn primary big hidden">게임 시작</button>
       </div>
@@ -46,6 +46,16 @@
     <div class="pause-box">
       <p>클릭해서 조준 모드로 돌아가기</p>
     </div>
+  </div>
+
+  <!-- ==================== 모바일 터치 컨트롤 ==================== -->
+  <div id="touch-controls" class="hidden">
+    <div id="joy-base">
+      <div id="joy-knob"></div>
+    </div>
+    <div id="btn-swap" class="btn-control">⚔️</div>
+    <div id="btn-reload" class="btn-control">↻</div>
+    <div id="btn-fire" class="btn-control">🔫</div>
   </div>
 
   <!-- ==================== HUD ==================== -->
