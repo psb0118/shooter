@@ -344,6 +344,26 @@ function createMatch(roomId) {
       p.firing = false;
     },
 
+    getPlayers() { return [...match._playerMap.values()]; },
+
+    getPlayer(id) { return match._playerMap.get(id) || null; },
+
+    /* 봇 AI용 — 조준점(몸통) 사이에 벽이 있는지 검사 */
+    hasLos(aId, bId) {
+      const a = match._playerMap.get(aId);
+      const b = match._playerMap.get(bId);
+      if (!a || !b) return false;
+      const ox = a.x, oy = EYE_HEIGHT, oz = a.z;
+      const tx = b.x, ty = 1.0, tz = b.z;
+      const dx = tx - ox, dy = ty - oy, dz = tz - oz;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      for (const box of MAP.obstacles) {
+        const t = rayBox(ox, oy, oz, dx, dy, dz, box);
+        if (t != null && t > 0.3 && t < dist - 0.1) return false;
+      }
+      return true;
+    },
+
     reload(id) {
       const p = match._playerMap.get(id);
       if (!p || !p.alive || p.reloading) return;

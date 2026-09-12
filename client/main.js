@@ -710,7 +710,7 @@ function renderLobby(room) {
   $("#player-list").innerHTML = room.players.map(p => `
     <div class="player-item">
       <span class="pdot ${p.team}"></span>
-      <span class="pname">${escapeHtml(p.nickname)}${p.socketId === socket.id ? " (나)" : ""}${!p.connected ? " (이탈)" : ""}</span>
+      <span class="pname">${escapeHtml(p.nickname)}${p.socketId === socket.id ? " (나)" : ""}${!p.connected ? " (이탈)" : ""}${p.isBot ? " 🤖" : ""}</span>
       ${p.socketId === room.host ? '<span class="phost">방장</span>' : ""}
     </div>`).join("");
   $("#btn-start").classList.toggle("hidden", !isHost);

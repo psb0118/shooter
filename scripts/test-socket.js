@@ -68,7 +68,7 @@ function once(sock, ev, timeout = 4000) {
     const gs = await startedA;
     await startedB;
     assert(gs.ok, "game:started ok");
-    assert(gs.map && gs.weapons && gs.state.players.length === 2, "맵/무기/스냅샷 전달");
+    assert(gs.map && gs.weapons && gs.state.players.length === 4, "맵/무기/스냅샷 전달 (인간 2 + 봇 2)");
     ok("게임 시작 & 맵/무기 전달");
 
     /* 입력 → 이동 상태 반영 */
@@ -99,6 +99,36 @@ function once(sock, ev, timeout = 4000) {
 
     a.close();
     b.close();
+
+    /* -------- 솔로 시작 + 봇 -------- */
+    const c = await connect("C");
+    c.emit("lobby:create", { nickname: "솔로" });
+    await once(c, "lobby:created");
+    const cStart = once(c, "game:started");
+    c.emit("lobby:start");
+    const gcs = await cStart;
+    assert(gcs.ok, "솔로 시작 ok");
+    assert.equal(gcs.state.players.length, 4, `봇 포함 4명 (${gcs.state.players.length}명)`);
+    const bots = gcs.state.players.filter(p => p.id.startsWith("bot-"));
+    assert.equal(bots.length, 3, "봇 3명");
+    assert.equal(gcs.state.players.filter(p => p.team === "red").length, 2, "레드 2명");
+    assert.equal(gcs.state.players.filter(p => p.team === "blue").length, 2, "블루 2명");
+    ok("혼자 시작 가능 → 봇으로 2:2 구성");
+
+    const bx0 = bots[0].x, bz0 = bots[0].z;
+    let botMoved = false;
+    for (let i = 0; i < 25; i++) {
+      const snap = await once(c, "game:state");
+      const bp = snap.players.find(p => p.id === bots[0].id);
+      if (bp && Math.hypot(bp.x - bx0, bp.z - bz0) > 1) { botMoved = true; break; }
+    }
+    assert(botMoved, "봇 AI 이동 안 함");
+    ok("봇 AI 이동");
+
+    c.emit("lobby:leave");
+    c.close();
+    await new Promise((r) => setTimeout(r, 200));
+
     console.log(`\n[socket] ${passed}개 테스트 통과`);
   } catch (err) {
     console.error("\n[socket] 테스트 실패:", err.message);
