@@ -12,6 +12,11 @@
 npm install
 npm start          # http://localhost:3000
 ```
+
+## 라이브 배포
+- **플레이 URL**: https://shooter-mfal.onrender.com/
+- GitHub push 시 Render가 자동 재배포됩니다 (`render.yaml`)
+- Free 티어라 15분 무접속 시 절전 → 첫 접속이 ~30초 느릴 수 있음
 서버 외부 접속 시:
 ```bash
 $env:PORT=3000; npm start        # (PowerShell)
