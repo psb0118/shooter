@@ -77,6 +77,28 @@ function waitUp(ms) {
 
     await page.waitForSelector("#hud:not(.hidden)", { visible: true, timeout: 15000 });
     console.log("[GAME] HUD visible => in game");
+
+    // --- 무기 선택 오버레이 ---
+    await page.waitForSelector("#weapon-select:not(.hidden)", { visible: true, timeout: 8000 });
+    const ws = await page.evaluate(() => ({
+      weapons: Object.keys(window.__s.weapons || {}),
+      locked: document.pointerLockElement !== null,
+      selectLock: window.__s.selectLock,
+    }));
+    console.log("[WEAPON-SELECT] shown", JSON.stringify(ws));
+    if (ws.weapons.length < 4) console.log("  !! weapons < 4");
+
+    await page.waitForSelector('.ws-card[data-w="sg"]', { visible: true, timeout: 5000 });
+    await page.click('.ws-card[data-w="sg"]');
+    await new Promise((r) => setTimeout(r, 600));
+    const afterPick = await page.evaluate(() => ({
+      myWeapon: window.__s.myWeapon,
+      locked: document.pointerLockElement !== null,
+      selectHidden: document.getElementById("weapon-select").classList.contains("hidden"),
+    }));
+    console.log("[WEAPON-PICK sg]", JSON.stringify(afterPick));
+    if (afterPick.myWeapon !== "sg" || !afterPick.locked || !afterPick.selectHidden) console.log("  !! pick/lock 문제");
+
     await new Promise((r) => setTimeout(r, 1500));
 
     const dump = await page.evaluate(() => {
@@ -147,6 +169,34 @@ function waitUp(ms) {
       const y1 = await page.evaluate(() => window.__s.myPred.yaw);
       console.log("[LOOK mouse-right] yaw", +y0.toFixed(3), "->", +y1.toFixed(3), (y1 < y0 ? "=> turn RIGHT OK" : "=> WRONG (inverted)"));
     }
+
+    // --- ADS 우클릭 확대 ---
+    if (await page.evaluate(() => document.pointerLockElement !== null)) {
+      await page.mouse.down({ button: "right" });
+      await new Promise((r) => setTimeout(r, 400));
+      const adsOn = await page.evaluate(() => window.__s.ads);
+      const fovOn = await page.evaluate(() => (+window.__s.camera.fov.toFixed(1)));
+      await page.mouse.up({ button: "right" });
+      await new Promise((r) => setTimeout(r, 300));
+      const adsOff = await page.evaluate(() => window.__s.ads);
+      console.log("[ADS] ads=" + adsOn + " fov=" + fovOn + " off=" + adsOff + (adsOn && !adsOff && fovOn < 60 ? " => OK" : " => FAIL"));
+    }
+
+    // --- P 키 무기 선택 토글 ---
+    await page.keyboard.press("KeyP");
+    await new Promise((r) => setTimeout(r, 400));
+    const pOpen = await page.evaluate(() => ({
+      shown: !document.getElementById("weapon-select").classList.contains("hidden"),
+      locked: document.pointerLockElement !== null,
+    }));
+    await page.keyboard.press("KeyP");
+    await new Promise((r) => setTimeout(r, 400));
+    const pClose = await page.evaluate(() => ({
+      shown: !document.getElementById("weapon-select").classList.contains("hidden"),
+      locked: document.pointerLockElement !== null,
+    }));
+    console.log("[KEY-P] open=" + JSON.stringify(pOpen) + " close=" + JSON.stringify(pClose) +
+      (pOpen.shown && !pOpen.locked && !pClose.shown && pClose.locked ? " => OK" : " => FAIL"));
 
     await new Promise((r) => setTimeout(r, 600));
     await page.screenshot({ path: "scripts/diagnose-shot.png" });

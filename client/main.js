@@ -34,7 +34,8 @@ const HOME_TEAM = { red: "RED", blue: "BLUE" };
 const state = {
   inGame: false,
   map: null,
-  players: new Map(),   // id -> { mesh group, target {...}, alive }
+  weapons: {},
+  players: new Map(),   // id -> { mesh group, target {...}, hp, hpBar, flinch }
   mapObjects: [],       // 셀로 클린업용
   tracers: [],
   impacts: [],
@@ -44,6 +45,9 @@ const state = {
   myPred: { x: 0, z: 0, vx: 0, vz: 0, yaw: 0, pitch: 0 },
   keys: { w: false, a: false, s: false, d: false, shift: false },
   firing: false,
+  ads: false,
+  selectLock: false,
+  myHurtAt: 0,
   lastSend: 0,
   myHP: 100,
   myAlive: true,
@@ -224,25 +228,68 @@ function makePlayerMesh(nickname, team) {
 
   const bodyMat = new THREE.MeshLambertMaterial({ color });
   const darkMat = new THREE.MeshLambertMaterial({ color: 0x22262f });
+  const vestMat = new THREE.MeshLambertMaterial({ color: 0x2c3446 });
   const skinMat = new THREE.MeshLambertMaterial({ color: 0xd8b28a });
 
+  // 다리
+  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.5, 0.26), darkMat);
+  legL.position.set(-0.18, 0.28, 0);
+  const legR = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.5, 0.26), darkMat);
+  legR.position.set(0.18, 0.28, 0);
+
+  // 몸통 + 방탄조끼
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.25, 0.44), bodyMat);
   body.position.y = 0.63;
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.42, 0.52), vestMat);
+  chest.position.y = 1.05;
 
-  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.4, 0.5), darkMat);
-  chest.position.set(0, 1.05, 0);
+  // 배낭
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 0.22), darkMat);
+  pack.position.set(0, 0.95, -0.32);
 
+  // 머리 + 헬멧
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.42), skinMat);
   head.position.y = 1.62;
+  const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.2, 0.46), darkMat);
+  helmet.position.set(0, 1.78, 0);
 
+  // 총 + 팀색 액센트
   const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.7), darkMat);
-  gun.position.set(0.3, 1.0, 0.5);
+  gun.position.set(0.34, 1.12, 0.5);
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.46), bodyMat);
+  trim.position.set(0, 1.3, 0);
 
   const nameSprite = makeNameSprite(nickname, team);
-  nameSprite.position.set(0, 2.35, 0);
+  nameSprite.position.set(0, 2.3, 0);
 
-  group.add(body, chest, head, gun, nameSprite);
-  return { group, body, head, gun, nameSprite };
+  const hpBar = makeHealthBar();
+  hpBar.sprite.position.set(0, 2.74, 0);
+
+  group.add(legL, legR, body, chest, pack, head, helmet, gun, trim, nameSprite, hpBar.sprite);
+  return { group, hpBar, nameSprite };
+}
+
+function makeHealthBar() {
+  const cv = document.createElement("canvas");
+  cv.width = 128; cv.height = 12;
+  const ctx = cv.getContext("2d");
+  const tex = new THREE.CanvasTexture(cv);
+  function draw(fr) {
+    const fill = Math.max(0, Math.min(1, fr == null ? 1 : fr));
+    ctx.clearRect(0, 0, 128, 12);
+    ctx.fillStyle = "rgba(0,0,0,0.72)";
+    ctx.fillRect(0, 0, 128, 12);
+    const r = Math.round(255 * (1 - fill));
+    const g = Math.round(255 * fill);
+    ctx.fillStyle = `rgb(${r},${g},40)`;
+    const w = Math.max(2, Math.round((128 - 4) * fill));
+    ctx.fillRect(2, 2, w, 8);
+    tex.needsUpdate = true;
+  }
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }));
+  sprite.scale.set(1.05, 0.11, 1);
+  draw(1);
+  return { sprite, update: (f) => draw(f) };
 }
 
 function makeNameSprite(text, team) {
@@ -258,7 +305,7 @@ function makeNameSprite(text, team) {
   ctx.fillStyle = color;
   ctx.fillText(text, 128, 32);
   const tex = new THREE.CanvasTexture(cv);
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false });
   const sprite = new THREE.Sprite(mat);
   sprite.scale.set(2.2, 0.55, 1);
   return sprite;
@@ -363,7 +410,16 @@ window.addEventListener("keydown", (e) => {
       break;
     case "Digit1": switchWeapon("smg"); break;
     case "Digit2": switchWeapon("ar"); break;
-    case "Digit3": switchWeapon("sr"); break;
+    case "Digit3": switchWeapon("sg"); break;
+    case "Digit4": switchWeapon("sr"); break;
+    case "KeyP":
+      if (state.inGame) {
+        if (state.selectLock) closeWeaponSelect(); else openWeaponSelect();
+      }
+      break;
+    case "Escape":
+      if (state.selectLock) closeWeaponSelect();
+      break;
   }
 });
 window.addEventListener("keyup", (e) => {
@@ -388,29 +444,85 @@ function switchWeapon(id) {
 }
 
 function cycleWeapon() {
-  const order = ["smg", "ar", "sr"];
+  const order = ["smg", "ar", "sg", "sr"];
   const cur = order.indexOf(state.myWeapon);
   switchWeapon(order[(cur + 1) % order.length]);
 }
 
+/* ---- 무기 선택 UI ---- */
+
+function weaponDesc(w) {
+  const desc = {
+    smg: "빠른 연사 · 근거리 제압",
+    ar: "균형 잡힌 명중률 · 기본",
+    sr: "한 방에 무거운 대미지 · 저격",
+    sg: "확산 펠릿 산탄 · 근거리",
+  };
+  return desc[w.id] || "";
+}
+
+function weaponIcon(w) {
+  return { smg: "🔫", ar: "🎯", sr: "🎇", sg: "💥" }[w.id] || "🔫";
+}
+
+function openWeaponSelect() {
+  const list = Object.values(state.weapons || {});
+  if (list.length === 0) {
+    state.selectLock = false;
+    return;
+  }
+  state.selectLock = true;
+  if (state.ads) { state.ads = false; $("#crosshair").classList.remove("ads"); }
+  if (document.pointerLockElement) document.exitPointerLock();
+  $("#pause").classList.add("hidden");
+  if (state.firing) state.firing = false;
+  const grid = $("#ws-grid");
+  grid.innerHTML = list.map((w) => `
+    <button class="ws-card${w.id === state.myWeapon ? " sel" : ""}" data-w="${w.id}">
+      <div class="ws-icon">${weaponIcon(w)}</div>
+      <div class="ws-name">${w.name}</div>
+      <div class="ws-desc">${weaponDesc(w)}</div>
+      <div class="ws-stats">DMG ${w.dmg} · ${Math.round(1 / w.cadence)}발/초 · ${w.magSize}발</div>
+    </button>`).join("");
+  grid.querySelectorAll(".ws-card").forEach((b) => {
+    b.addEventListener("click", () => pickWeapon(b.dataset.w));
+  });
+  $("#weapon-select").classList.remove("hidden");
+}
+
+function closeWeaponSelect() {
+  state.selectLock = false;
+  $("#weapon-select").classList.add("hidden");
+  if (!TOUCH && state.inGame) renderer.domElement.requestPointerLock();
+}
+
+function pickWeapon(id) {
+  switchWeapon(id);
+  closeWeaponSelect();
+}
+
 renderer.domElement.addEventListener("mousedown", (e) => {
-  if (e.button !== 0 || TOUCH) return;
-  if (!state.inGame) return;
+  if (TOUCH || state.selectLock || !state.inGame) return;
   if (document.pointerLockElement !== renderer.domElement) {
     renderer.domElement.requestPointerLock();
     return;
   }
-  state.firing = true;
+  if (e.button === 0) state.firing = true;
+  else if (e.button === 2) state.ads = true;
 });
-window.addEventListener("mouseup", (e) => {
-  if (e.button === 0 && !TOUCH) state.firing = false;
-});
+function onMouseUp(e) {
+  if (TOUCH) return;
+  if (e.button === 0) state.firing = false;
+  else if (e.button === 2) state.ads = false;
+}
+window.addEventListener("mouseup", onMouseUp);
+window.addEventListener("contextmenu", (e) => e.preventDefault());
 
 document.addEventListener("pointerlockchange", () => {
   if (TOUCH) return;
   const locked = document.pointerLockElement === renderer.domElement;
   $("#pause").classList.toggle("hidden", locked || !state.inGame);
-  if (!locked) state.firing = false;
+  if (!locked) { state.firing = false; state.ads = false; }
 });
 
 renderer.domElement.addEventListener("pointerlockerror", () => {
@@ -464,7 +576,7 @@ function updateJoyTouch(t) {
 }
 
 document.addEventListener("touchstart", (e) => {
-  if (!state.inGame) return;
+  if (!state.inGame || state.selectLock) return;
   e.preventDefault();
   for (const t of e.changedTouches) {
     const ctrl = isCtrlTarget(t);
@@ -578,6 +690,7 @@ const Sfx = (() => {
         smg: [3200, 0.9, 0.03],
         ar: [2000, 1.4, 0.05],
         sr: [900, 2, 0.09],
+        sg: [700, 1.6, 0.13],
       };
       const [f, q, g] = cfg[w] || cfg.ar;
       noiseBurst(0.08, f, q, g);
@@ -594,12 +707,13 @@ const Sfx = (() => {
    HUD 업데이트
 ========================================================= */
 
-const WEAPON_LABEL = { smg: "SMG", ar: "AR", sr: "Sniper" };
+const WEAPON_LABEL = { smg: "SMG", ar: "AR", sr: "Sniper", sg: "Shotgun" };
 
 function updateHud() {
   $("#healthfill").style.width = Math.max(0, Math.min(100, state.myHP)) + "%";
   $("#kd").textContent = state.myKD ? `${state.myKD.kills}/${state.myKD.deaths}` : "0/0";
-  $("#weapon-name").textContent = WEAPON_LABEL[state.myWeapon] || "AR";
+  const w = state.weapons[state.myWeapon];
+  $("#weapon-name").textContent = (w && w.name) || WEAPON_LABEL[state.myWeapon] || "AR";
   const ammoEl = $("#ammo");
   if (state.myReloading) {
     ammoEl.textContent = "재장전 중…";
@@ -748,6 +862,7 @@ socket.on("game:sync", (d) => {
   if (state.inGame) return;
   state.map = d.map;
   state.inGame = true;
+  state.weapons = d.weapons || {};
   state.scores = { red: 0, blue: 0 };
   state.killfeed = [];
   state.myPred = { x: 0, z: 0, vx: 0, vz: 0, yaw: 0, pitch: 0 };
@@ -784,8 +899,11 @@ socket.on("game:started", (d) => {
       state.myPred.z = p.z;
       state.myPred.yaw = p.yaw;
       state.myPred.pitch = p.pitch;
+      state.myWeapon = p.weapon;
     }
   }
+
+  state.weapons = d.weapons || {};
 
   buildWorld(d.map);
   $("#lobby").classList.add("hidden");
@@ -794,7 +912,8 @@ socket.on("game:started", (d) => {
   $("#hud").classList.remove("hidden");
   $("#killfeed").innerHTML = "";
   $("#touch-controls").classList.toggle("hidden", !TOUCH);
-  if (!TOUCH) renderer.domElement.requestPointerLock();
+  if (!TOUCH && document.pointerLockElement === renderer.domElement) document.exitPointerLock();
+  openWeaponSelect();
   Sfx.unlock();
 });
 
@@ -837,7 +956,7 @@ socket.on("game:state", (snap) => {
       mesh.group.position.set(sp.x, 0, sp.z);
       mesh.group.rotation.y = sp.yaw;
       scene.add(mesh.group);
-      p = { group: mesh.group, target: { x: sp.x, z: sp.z, yaw: sp.yaw, pitch: sp.pitch } };
+      p = { group: mesh.group, hpBar: mesh.hpBar, hp: sp.hp, flinch: 0, target: { x: sp.x, z: sp.z, yaw: sp.yaw, pitch: sp.pitch } };
       state.players.set(sp.id, p);
     }
     // 서버 좌표 따라가기 (리모트)
@@ -845,6 +964,10 @@ socket.on("game:state", (snap) => {
     p.target.z = sp.z;
     p.target.yaw = sp.yaw;
     p.target.pitch = sp.pitch;
+    if (sp.hp !== p.hp) {
+      p.hp = sp.hp;
+      p.hpBar.update(Math.max(0, sp.hp) / 100);
+    }
   }
 
   // 퇴장 플레이어 정리
@@ -869,8 +992,8 @@ socket.on("game:fx", (fx) => {
   scene.add(line);
   state.tracers.push({ line, born: performance.now() });
 
-  // 발사음 (내가 쏜 것만 크게)
-  if (fx.shooter === myId()) Sfx.shot(fx.weapon);
+  // 발사음 (내가 쏜 것만 크게, 펠릿 사석은 한 번만)
+  if (fx.shooter === myId() && fx.snd !== false) Sfx.shot(fx.weapon);
 
   // 임팩트 이펙트 (히트 시)
   if (fx.hit) {
@@ -892,6 +1015,11 @@ function makeImpact(pos, weapon) {
 socket.on("game:hurt", (d) => {
   if (d.pid === myId()) {
     flashDamage();
+    state.myHurtAt = performance.now();
+  }
+  if (d.pid !== myId() && d.byId === myId()) {
+    const p = state.players.get(d.pid);
+    if (p) p.flinch = performance.now();
   }
   if (d.byId === myId() && d.pid !== myId()) {
     showHitmarker();
@@ -924,6 +1052,10 @@ socket.on("game:spawn", (d) => {
 socket.on("game:ended", (d) => {
   state.inGame = false;
   state.firing = false;
+  state.ads = false;
+  state.selectLock = false;
+  $("#crosshair").classList.remove("ads");
+  $("#weapon-select").classList.add("hidden");
   if (document.pointerLockElement === renderer.domElement) document.exitPointerLock();
   $("#death-screen").classList.add("hidden");
   $("#hud").classList.add("hidden");
@@ -950,22 +1082,31 @@ function animate(now) {
 
   if (state.inGame && state.myAlive) {
     const controllable = TOUCH || document.pointerLockElement === renderer.domElement;
+    const selectStopped = state.selectLock;
     const anyMove = state.keys.w || state.keys.a || state.keys.s || state.keys.d ||
                     state.keys.arrowL || state.keys.arrowR || state.keys.arrowU || state.keys.arrowD;
 
-    // 자기 예측 이동 (포인터 락 없이도 키 입력이 있으면 동작 — 데스크톱 폴백)
-    if (controllable || anyMove) {
+    // 자기 예측 이동 (포인터 락 없이도 키 입력이 있으면 동작 — 데스크톱 폴백, 무기 선택 중엔 정지)
+    if (!selectStopped && (controllable || anyMove)) {
       predictStep(state.myPred, state.keys, dt);
     }
 
     // 포인터 락이 잡히지 않은 데스크톱 → 방향키로 시야 회전
-    if (!TOUCH && document.pointerLockElement !== renderer.domElement) {
+    if (!TOUCH && !selectStopped && document.pointerLockElement !== renderer.domElement) {
       const kv = 2.2 * dt;
       if (state.keys.arrowL) state.myPred.yaw += kv;
       if (state.keys.arrowR) state.myPred.yaw -= kv;
       if (state.keys.arrowU) state.myPred.pitch = Math.max(-1.52, state.myPred.pitch + kv * 0.7);
       if (state.keys.arrowD) state.myPred.pitch = Math.min(1.52, state.myPred.pitch - kv * 0.7);
     }
+
+    // ADS 확대 조준 (fov 부드럽게 보간)
+    const targetFov = state.ads ? 42 : 75;
+    if (Math.abs(camera.fov - targetFov) > 0.05) {
+      camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 14);
+      camera.updateProjectionMatrix();
+    }
+    $("#crosshair").classList.toggle("ads", !!state.ads);
 
     // 카메라 배치
     const cx = state.myPred.x;
@@ -982,22 +1123,39 @@ function animate(now) {
     );
     camera.lookAt(camera.position.clone().add(cdir));
 
-    // 뷰모델 흔들림
-    viewmodel.position.set(0.28, -0.28 - camRecoil * 0.02, -0.5);
+    // 피격 순간 카메라 킥 (롤 흔들림 — 조준선과 무관하여 에임 불일치 없음)
+    if (state.myHurtAt) {
+      const ha = (now - state.myHurtAt) / 1000;
+      if (ha < 0.25) {
+        camera.rotation.z = Math.sin((ha / 0.25) * Math.PI) * 0.035 * (1 - ha / 0.25 * 0.5);
+      } else {
+        camera.rotation.z = 0;
+        state.myHurtAt = 0;
+      }
+    }
 
-    // 입력 전송 (30Hz 근처)
-    if (now - state.lastSend >= INPUT_INTERVAL) {
-      state.lastSend = now;
-      socket.emit("game:input", {
-        keys: state.keys,
-        yaw: state.myPred.yaw,
-        pitch: state.myPred.pitch,
-        firing: state.firing,
-      });
+    // 뷰모델: ADS 시 중앙 정조준 위치로
+    const vmTarget = state.ads ? [0, -0.24, -0.34] : [0.28, -0.28 - camRecoil * 0.02, -0.5];
+    viewmodel.position.x += (vmTarget[0] - viewmodel.position.x) * Math.min(1, dt * 16);
+    viewmodel.position.y += (vmTarget[1] - viewmodel.position.y) * Math.min(1, dt * 16);
+    viewmodel.position.z += (vmTarget[2] - viewmodel.position.z) * Math.min(1, dt * 16);
+
+    // 입력 전송 (30Hz 근처, 무기 선택 중엔 중지)
+    if (!selectStopped) {
+      if (now - state.lastSend >= INPUT_INTERVAL) {
+        state.lastSend = now;
+        socket.emit("game:input", {
+          keys: state.keys,
+          yaw: state.myPred.yaw,
+          pitch: state.myPred.pitch,
+          firing: state.firing,
+          ads: state.ads,
+        });
+      }
     }
   }
 
-  // 리모트 플레이어 보간
+  // 리모트 플레이어 보간 + 플린치
   const t = 1 - Math.exp(-dt * 14);
   for (const [, p] of state.players) {
     const g = p.group;
@@ -1005,6 +1163,17 @@ function animate(now) {
     g.position.x += (p.target.x - g.position.x) * t;
     g.position.z += (p.target.z - g.position.z) * t;
     g.rotation.y = lerpAngle(g.rotation.y, p.target.yaw, t);
+    if (p.flinch) {
+      const fa = (now - p.flinch) / 1000;
+      if (fa < 0.18) {
+        g.rotation.z = Math.sin((fa / 0.18) * Math.PI) * 0.22;
+      } else {
+        g.rotation.z = 0;
+        p.flinch = 0;
+      }
+    } else {
+      g.rotation.z *= 0.85;
+    }
   }
 
   // 트레이서 수명
@@ -1055,5 +1224,9 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// 디버그 훅 확장 (ES 모듈 스코프 노출)
+window.__s.camera = camera;
+window.__s.renderer = renderer;
 
 requestAnimationFrame(animate);

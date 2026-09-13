@@ -59,6 +59,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 
 #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+#crosshair.ads { display: none; }
 #crosshair .dot {
   width: 6px; height: 6px; background: #fff; border-radius: 50%;
   box-shadow: 0 0 4px rgba(255,255,255,.9);
@@ -117,6 +118,26 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 .kill-item .victim { color: #c3cad8; }
 .kill-item .hs { color: #ffd75f; margin-left: 4px; font-size: 11px; }
 @keyframes feedin { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ==================== 무기 선택 ==================== */
+.overlay.weapons { background: rgba(6, 8, 14, 0.72); pointer-events: auto; z-index: 25; }
+.ws-box { width: 720px; max-width: 94vw; max-height: 88vh; overflow-y: auto; background: #141926; border: 1px solid #2a3242; border-radius: 14px; padding: 24px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.ws-box h2 { font-size: 26px; text-align: center; letter-spacing: 2px; }
+.ws-sub { text-align: center; color: #7c8698; font-size: 13px; margin: 6px 0 18px; }
+.ws-sub b { color: #5fd1ff; }
+#ws-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.ws-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 10px;
+  background: #0d1119; border: 1px solid #2a3242; border-radius: 12px; color: #e8ecf4;
+  font-family: inherit; cursor: pointer; transition: background .15s, border-color .15s, transform .1s;
+}
+.ws-card:hover { background: #182030; border-color: #4a7cff; transform: translateY(-2px); }
+.ws-card.sel { border-color: #ffd75f; background: #1d2435; }
+.ws-name { font-size: 17px; font-weight: 800; letter-spacing: 1px; }
+.ws-icon { font-size: 26px; }
+.ws-desc { font-size: 12px; color: #9aa5b5; text-align: center; line-height: 1.45; min-height: 34px; }
+.ws-stats { font-size: 12px; color: #ffd75f; }
+.ws-current { font-size: 11px; color: #5fd1ff; font-weight: 700; }
 
 /* ==================== 일시정지/사망/종료 ==================== */
 .pause-box p, .death-box .big { font-size: 22px; font-weight: 700; }

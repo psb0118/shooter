@@ -23,9 +23,10 @@ const HEADSHOT_MULT = 1.5;
 ========================================================= */
 
 const WEAPONS = {
-  smg: { id: "smg",  name: "SMG",  dmg: 6,  cadence: 0.115, spread: 0.018, magSize: 30, reloadTime: 1.6, auto: true  },
-  ar:  { id: "ar",   name: "AR",   dmg: 11, cadence: 0.125, spread: 0.005, magSize: 30, reloadTime: 2.0, auto: true  },
-  sr:  { id: "sr",   name: "SR",   dmg: 55, cadence: 1.05,  spread: 0.0,   magSize: 5,  reloadTime: 2.6, auto: false },
+  smg: { id: "smg",  name: "SMG",     dmg: 6,  cadence: 0.115, spread: 0.018, magSize: 30, reloadTime: 1.6, auto: true  },
+  ar:  { id: "ar",   name: "AR",      dmg: 11, cadence: 0.125, spread: 0.005, magSize: 30, reloadTime: 2.0, auto: true  },
+  sr:  { id: "sr",   name: "SNIPER",  dmg: 55, cadence: 1.05,  spread: 0.0,   magSize: 5,  reloadTime: 2.6, auto: false },
+  sg:  { id: "sg",   name: "SHOTGUN", dmg: 9,  cadence: 0.9,   spread: 0.085, magSize: 6,  reloadTime: 2.2, auto: false, pellets: 6, range: 45 },
 };
 
 /* =========================================================
@@ -197,7 +198,7 @@ function completeReload(player) {
 
 function shootRay(player, now) {
   const wpn = WEAPONS[player.weapon];
-  const spread = wpn.spread;
+  const spread = wpn.spread * (player.ads ? 0.35 : 1);
   const jitter = () => (Math.random() - 0.5) * 2;
 
   const y2 = player.yaw + jitter() * spread;
@@ -241,7 +242,8 @@ function shootRay(player, now) {
     const hx = ox + dx * best.t;
     const hy = oy + dy * best.t;
     const hz = oz + dz * best.t;
-    const dmg = Math.round(wpn.dmg * (best.head ? HEADSHOT_MULT : 1));
+    let dmg = Math.round(wpn.dmg * (best.head ? HEADSHOT_MULT : 1));
+    if (wpn.range) dmg = Math.round(dmg * Math.max(0.3, 1 - best.t / wpn.range));
     return { hit: true, target: best.target, head: best.head, dmg, ox, oy, oz, dx, dy, dz, hitX: hx, hitY: hy, hitZ: hz };
   }
 
@@ -332,6 +334,7 @@ function createMatch(roomId) {
       if (typeof data.yaw === "number")   p.yaw = data.yaw;
       if (typeof data.pitch === "number") p.pitch = data.pitch;
       if (typeof data.firing === "boolean") p.firing = data.firing;
+      if (typeof data.ads === "boolean")   p.ads = data.ads;
     },
 
     setWeapon(id, weaponId) {
@@ -441,17 +444,18 @@ function createMatch(roomId) {
         p.x = clamp(p.x, -hs, hs);
         p.z = clamp(p.z, -hs, hs);
 
-        // 사격
+        // 사격 (샷건 등 다탄환 지원)
         if (p.firing && p.alive && !p.reloading && p.ammo > 0) {
           const wpn = WEAPONS[p.weapon];
           if (now - p.lastShootAt >= wpn.cadence) {
             p.lastShootAt = now;
             p.ammo--;
+            const shots = wpn.pellets || 1;
+            for (let k = 0; k < shots; k++) {
+              const result = shootRay(p, now);
+              events.push({ type: "shot", pid: p.id, weapon: p.weapon, snd: k === 0, ...result });
+              if (!result.hit || !result.target) continue;
 
-            const result = shootRay(p, now);
-            events.push({ type: "shot", pid: p.id, weapon: p.weapon, ...result });
-
-            if (result.hit && result.target) {
               const victim = result.target;
               victim.hp -= result.dmg;
               events.push({ type: "hurt", pid: victim.id, byId: p.id, dmg: result.dmg, headshot: result.head, hp: Math.max(0, victim.hp), hpMax: 100 });
@@ -473,6 +477,7 @@ function createMatch(roomId) {
                   events.push({ type: "end", winner: p.team, scores: { ...match.scores } });
                   return events;
                 }
+                break; // 이 탄환에서 사망 — 다음 탄환 불필요
               }
             }
 

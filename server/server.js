@@ -202,6 +202,7 @@ setInterval(() => {
             dx: ev.dx, dy: ev.dy, dz: ev.dz,
             hitX: ev.hitX, hitY: ev.hitY, hitZ: ev.hitZ,
             hit: ev.hit, weapon: ev.weapon, shooter: ev.pid,
+            snd: ev.snd !== false,
           });
           break;
         case "hurt":

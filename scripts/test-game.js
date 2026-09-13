@@ -93,6 +93,39 @@ function run(m, seconds) {
   ok("벽이 광선을 막음");
 }
 
+/* --- 2-2. 샷건 멀티 펠릿 --- */
+{
+  const m = fakeClock(makeMatch(), 0);
+  const p1 = m._playerMap.get("p1");
+  const p2 = m._playerMap.get("p2");
+  p1.lastShootAt = -100;
+  p1.weapon = "sg";
+  p1.ammo = WEAPONS.sg.magSize;
+  p2.x = p1.x; p2.z = p1.z + 8;
+  p1.yaw = 0; p1.pitch = 0;
+  m.input("p1", { keys: {}, yaw: 0, pitch: 0, firing: true });
+  const events = run(m, 0.5);
+  const shots = events.filter(e => e.type === "shot");
+  assert(shots.length === (WEAPONS.sg.pellets || 1), `샷건 펠릿 ${WEAPONS.sg.pellets}발 발사`);
+  assert(shots.filter(s => s.snd !== false).length === 1, "발사음 한 번만(snd)");
+  assert(events.filter(e => e.type === "hurt").length >= 1, "근접 샷건 명중");
+  ok(`샷건 펠릿 ${shots.length}발 · 피격 ${events.filter(e => e.type === "hurt").length}회`);
+}
+
+/* --- 2-3. ADS 확대 조준 시 스프레드 감소 --- */
+{
+  const m = fakeClock(makeMatch(), 0);
+  const p1 = m._playerMap.get("p1");
+  p1.lastShootAt = -100;
+  p1.weapon = "ar";
+  p1.ammo = WEAPONS.ar.magSize;
+  m.input("p1", { keys: {}, yaw: 0, pitch: 0, firing: true, ads: true });
+  assert(p1.ads === true, "ads 플래그 저장");
+  const ev = run(m, 0.5);
+  assert(ev.find(e => e.type === "shot"), "ADS 상태에서 발사 가능");
+  ok("ADS 플래그 저장 & 발사");
+}
+
 /* --- 3. 킬 → 점수/리스폰 --- */
 {
   console.log("3) 킬 처리");
