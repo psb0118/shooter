@@ -289,8 +289,8 @@ function predictStep(p, keys, dt) {
   let ix = 0, iz = 0;
   if (keys.w) { ix += Math.sin(y); iz += Math.cos(y); }
   if (keys.s) { ix -= Math.sin(y); iz -= Math.cos(y); }
-  if (keys.a) { ix -= Math.cos(y); iz += Math.sin(y); }
-  if (keys.d) { ix += Math.cos(y); iz -= Math.sin(y); }
+  if (keys.a) { ix += Math.cos(y); iz -= Math.sin(y); }
+  if (keys.d) { ix -= Math.cos(y); iz += Math.sin(y); }
   const il = Math.sqrt(ix * ix + iz * iz) || 1;
   ix /= il; iz /= il;
   const tx = ix * MOVE_SPEED * walk;
@@ -340,7 +340,7 @@ const SENS = 0.0022;
 
 document.addEventListener("mousemove", (e) => {
   if (!state.inGame || document.pointerLockElement !== renderer.domElement) return;
-  state.myPred.yaw = state.myPred.yaw + e.movementX * SENS;
+  state.myPred.yaw = state.myPred.yaw - e.movementX * SENS;
   state.myPred.pitch = Math.max(-1.52, Math.min(1.52, state.myPred.pitch - e.movementY * SENS));
 });
 
@@ -507,7 +507,7 @@ document.addEventListener("touchmove", (e) => {
       const dx = t.clientX - prev.x;
       const dy = t.clientY - prev.y;
       prev.x = t.clientX; prev.y = t.clientY;
-      state.myPred.yaw += dx * TOUCH_SENS;
+      state.myPred.yaw -= dx * TOUCH_SENS;
       state.myPred.pitch = Math.max(-1.52, Math.min(1.52, state.myPred.pitch - dy * TOUCH_SENS));
       if (Math.abs(dx) > 0.5) state.myPred.yaw = ((state.myPred.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
     } else {
@@ -981,7 +981,6 @@ function animate(now) {
       Math.cos(state.myPred.yaw) * Math.cos(state.myPred.pitch)
     );
     camera.lookAt(camera.position.clone().add(cdir));
-    camera.rotateX(camRecoil * 0.04);
 
     // 뷰모델 흔들림
     viewmodel.position.set(0.28, -0.28 - camRecoil * 0.02, -0.5);

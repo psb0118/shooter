@@ -419,8 +419,8 @@ function createMatch(roomId) {
         let ix = 0, iz = 0;
         if (p.keys.w) { ix += Math.sin(y); iz += Math.cos(y); }
         if (p.keys.s) { ix -= Math.sin(y); iz -= Math.cos(y); }
-        if (p.keys.a) { ix -= Math.cos(y); iz += Math.sin(y); }
-        if (p.keys.d) { ix += Math.cos(y); iz -= Math.sin(y); }
+        if (p.keys.a) { ix += Math.cos(y); iz -= Math.sin(y); }
+        if (p.keys.d) { ix -= Math.cos(y); iz += Math.sin(y); }
         const il = Math.sqrt(ix*ix + iz*iz) || 1;
         ix /= il; iz /= il;
         const tx = ix * MOVE_SPEED * walk;

@@ -113,6 +113,23 @@ function waitUp(ms) {
     const dist = +Math.hypot(end.x - start.x, end.z - start.z).toFixed(3);
     console.log("[W-MOVE] dist=" + dist + (dist > 1 ? " => moved OK" : " => NOT moving"));
 
+    // A 스트레이프 방향: yaw=π(남쪽 응시)에서 A=왼쪽(-X), D=오른쪽(+X)
+    const posA0 = await page.evaluate(() => ({ x: window.__s.myPred.x, z: window.__s.myPred.z, yaw: window.__s.myPred.yaw }));
+    await page.keyboard.down("KeyA");
+    await new Promise((r) => setTimeout(r, 700));
+    await page.keyboard.up("KeyA");
+    const posA1 = await page.evaluate(() => window.__s.myPred.x);
+    const aDx = +(posA1 - posA0.x).toFixed(3);
+    console.log("[STRAFE-A] facing yaw=" + +posA0.yaw.toFixed(2) + " dx=" + aDx + (aDx < -0.5 ? " => LEFT OK" : " => WRONG DIR"));
+
+    const posD0 = await page.evaluate(() => window.__s.myPred.x);
+    await page.keyboard.down("KeyD");
+    await new Promise((r) => setTimeout(r, 700));
+    await page.keyboard.up("KeyD");
+    const posD1 = await page.evaluate(() => window.__s.myPred.x);
+    const dDx = +(posD1 - posD0).toFixed(3);
+    console.log("[STRAFE-D] dx=" + dDx + (dDx > 0.5 ? " => RIGHT OK" : " => WRONG DIR"));
+
     const y0 = await page.evaluate(() => window.__s.myPred.yaw);
     await page.keyboard.down("ArrowRight");
     await new Promise((r) => setTimeout(r, 400));
@@ -122,13 +139,13 @@ function waitUp(ms) {
 
     console.log("[TITLE]", await page.$eval("title", (t) => t.textContent));
 
-    // 포인터 락 활성 상태에서 마우스 움직임 = 시야 회전 확인
+    // 포인터 락 활성 상태에서 마우스 오른쪽 이동 = 시야 오른쪽 회전 (yaw 감소) 확인
     if (await page.evaluate(() => document.pointerLockElement !== null)) {
       const y0 = await page.evaluate(() => window.__s.myPred.yaw);
       await page.mouse.move(700, 500, { steps: 8 });
       await page.mouse.move(900, 500, { steps: 8 });
       const y1 = await page.evaluate(() => window.__s.myPred.yaw);
-      console.log("[LOOK mouse-lock] yaw", +y0.toFixed(3), "->", +y1.toFixed(3), "delta", +(y1 - y0).toFixed(3), (Math.abs(y1 - y0) > 0.001 ? "=> mouse look OK" : "=> mouse look X"));
+      console.log("[LOOK mouse-right] yaw", +y0.toFixed(3), "->", +y1.toFixed(3), (y1 < y0 ? "=> turn RIGHT OK" : "=> WRONG (inverted)"));
     }
 
     await new Promise((r) => setTimeout(r, 600));
