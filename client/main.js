@@ -54,6 +54,8 @@ const state = {
 
 function myId() { return socket.id; }
 
+window.__s = state; // 디버그용 상태 접근 훅
+
 /* =========================================================
    렌더러 초기화
 ========================================================= */
@@ -805,21 +807,6 @@ socket.on("game:state", (snap) => {
   const seen = new Set();
   for (const sp of snap.players) {
     seen.add(sp.id);
-    let p = state.players.get(sp.id);
-    if (!p) {
-      const mesh = makePlayerMesh(sp.nickname, sp.team);
-      mesh.group.position.set(sp.x, 0, sp.z);
-      mesh.group.rotation.y = sp.yaw;
-      scene.add(mesh.group);
-      p = { group: mesh, target: { x: sp.x, z: sp.z, yaw: sp.yaw, pitch: sp.pitch } };
-      state.players.set(sp.id, p);
-    }
-    // 서버가 리스폰시킨 좌표 변화는 즉시 반영 (리모트/자기)
-    p.target.x = sp.x;
-    p.target.z = sp.z;
-    p.target.yaw = sp.yaw;
-    p.target.pitch = sp.pitch;
-
     if (sp.id === myId()) {
       state.myTeam = sp.team;
       state.myHP = sp.hp;
@@ -839,13 +826,25 @@ socket.on("game:state", (snap) => {
         state.myPred.vz = 0;
       }
 
-      if (!sp.alive) {
-        $("#death-screen").classList.remove("hidden");
-      } else {
-        $("#death-screen").classList.add("hidden");
-      }
+      $("#death-screen").classList.toggle("hidden", !!sp.alive);
       updateHud();
+      continue;
     }
+
+    let p = state.players.get(sp.id);
+    if (!p) {
+      const mesh = makePlayerMesh(sp.nickname, sp.team);
+      mesh.group.position.set(sp.x, 0, sp.z);
+      mesh.group.rotation.y = sp.yaw;
+      scene.add(mesh.group);
+      p = { group: mesh.group, target: { x: sp.x, z: sp.z, yaw: sp.yaw, pitch: sp.pitch } };
+      state.players.set(sp.id, p);
+    }
+    // 서버 좌표 따라가기 (리모트)
+    p.target.x = sp.x;
+    p.target.z = sp.z;
+    p.target.yaw = sp.yaw;
+    p.target.pitch = sp.pitch;
   }
 
   // 퇴장 플레이어 정리
