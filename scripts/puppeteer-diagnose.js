@@ -5,16 +5,21 @@ const http = require("http");
 const PORT = process.env.PORT || 3000;
 const BASE = process.env.BASE || `http://localhost:${PORT}`;
 const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+const LOCAL = BASE.startsWith("http://localhost") || BASE.startsWith("http://127.0.0.1");
 
-const server = spawn(process.execPath, ["server/server.js"], {
-  cwd: process.cwd(),
-  stdio: ["ignore", "inherit", "inherit"],
-});
+let server = null;
+if (LOCAL) {
+  server = spawn(process.execPath, ["server/server.js"], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "inherit", "inherit"],
+  });
+}
 
 function waitUp(ms) {
   const tryOne = () =>
     new Promise((resolve) => {
-      const req = http.get(BASE, (res) => {
+      const mod = BASE.startsWith("https") ? require("https") : require("http");
+      const req = mod.get(BASE, (res) => {
         res.resume();
         res.on("end", () => resolve(true));
       });
@@ -138,10 +143,10 @@ function waitUp(ms) {
   if (logs.length === 0) console.log("(no console/page errors)");
 
   await browser.close();
-  server.kill();
+  if (server) server.kill();
   process.exit(0);
 })().catch((e) => {
   console.error("DIAGNOSE FATAL", e);
-  server.kill();
+  if (server) server.kill();
   process.exit(1);
 });
