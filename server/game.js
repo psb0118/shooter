@@ -591,7 +591,7 @@ function createMatch(roomId) {
         victim.deaths++;
         actor.kills++;
         actor.money = clamp(actor.money + MONEY_KILL, 0, MAX_MONEY);
-        events.push({ type: "kill", killerId: actor.id, killerName: actor.nickname, killerTeam: actor.team, victimId: victim.id, victimName: victim.nickname, victimTeam: victim.team, headshot: result.head });
+        events.push({ type: "kill", killerId: actor.id, killerName: actor.nickname, killerTeam: actor.team, weapon: actor.weapon, victimId: victim.id, victimName: victim.nickname, victimTeam: victim.team, headshot: result.head });
 
         // 캐리어 사망 → 스파이크 드랍
         if (match.spike.carrierId === victim.id) {
@@ -690,6 +690,9 @@ function createMatch(roomId) {
 
       const canAct = match.phase === "buy" || match.phase === "combat";
 
+      // 구매/전투 모두 HUD 타이머 카운트다운 (발로란트: 구매단계도 제한시간 표시)
+      if (canAct) match.timeLeft -= dt;
+
       // 플레이어 물리/사격
       if (canAct) {
         for (const [, p] of match._playerMap) {
@@ -762,7 +765,7 @@ function createMatch(roomId) {
             if (p.team === match.attackTeam) aliveAttack++; else aliveDefend++;
           }
 
-          match.timeLeft -= dt;
+          match.timeLeft = Math.max(0, match.timeLeft);
           let win = null, reason = null;
 
           if (match.spike.planted) {

@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     stdio: "ignore",
   });
 
-  await sleep(1200);
+  await sleep(3000);
 
   let passed = 0;
   const ok = (n) => { passed++; console.log(`  ✓ ${n}`); };

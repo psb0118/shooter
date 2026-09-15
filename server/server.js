@@ -510,21 +510,13 @@ io.on("connection", (socket) => {
     if (!room || room.status !== "playing" || !room.match) return;
     const ok = room.match.buy(socket.id, String(data?.weapon || ""));
     const me = room.match.getPlayer(socket.id);
-    socket.emit("game:buy", { ok: !!ok, weapon: data?.weapon, money: me ? me.money : 0 });
+    socket.emit("game:buy", { ok: !!ok, weapon: me ? me.weapon : "", money: me ? me.money : 0 });
   });
 
   socket.on("game:interact", (data) => {
     const room = ROOMS.get(socket.data.roomId);
     if (!room || room.status !== "playing" || !room.match) return;
     room.match.interact(socket.id, data || {});
-  });
-
-  socket.on("game:weapon", (data) => {
-    const room = ROOMS.get(socket.data.roomId);
-    if (!room || !room.match) return;
-    const ok = room.match.buy(socket.id, String(data?.weapon || ""));
-    const me = room.match.getPlayer(socket.id);
-    socket.emit("game:buy", { ok: !!ok, weapon: data?.weapon, money: me ? me.money : 0 });
   });
 
   socket.on("game:reload", () => {

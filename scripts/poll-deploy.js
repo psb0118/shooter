@@ -1,6 +1,6 @@
 const https = require("https");
 const URL = process.env.URL || "https://shooter-mfal.onrender.com";
-const MARKER = process.env.MARKER || "group: mesh.group";
+const MARKER = process.env.MARKER || "joinBuyOpened";
 const t0 = Date.now();
 
 function poll() {

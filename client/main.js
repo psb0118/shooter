@@ -68,6 +68,7 @@ const state = {
   lastInput: 0,
   cam: { fov: 75 },
   viewmodel: null,
+  lastViewModel: null,
   crosshairDot: null,
 };
 
@@ -170,26 +171,71 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.15);
 sun.position.set(40, 90, 25);
 scene.add(sun);
 
-/* ------------- 뷰모델 (1인칭 총) ------------- */
+/* ------------- 뷰모델 (1인칭 총 — 무기별 실루엣/색 변화) ------------- */
+
+const VM_LOOK = {
+  pistol: { color: 0x9aa0b0, w: 0.07,  len: 0.34, magLen: 0.12 },
+  smg:    { color: 0x4f86d8, w: 0.085, len: 0.5,  magLen: 0.18 },
+  ar:     { color: 0x36a77a, w: 0.09,  len: 0.62, magLen: 0.22 },
+  sr:     { color: 0xa25fd0, w: 0.08,  len: 0.82, magLen: 0.2 },
+  sg:     { color: 0xd08a3c, w: 0.12,  len: 0.52, magLen: 0.24 },
+};
+
+let viewmodel = null;
+
+function clearViewModel() {
+  if (!viewmodel) return;
+  while (viewmodel.children.length) {
+    const c = viewmodel.children[0];
+    viewmodel.remove(c);
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) {
+      if (Array.isArray(c.material)) c.material.forEach((m) => m.dispose());
+      else c.material.dispose();
+    }
+  }
+}
+
+function buildViewModel(weaponId) {
+  clearViewModel();
+  const spec = VM_LOOK[weaponId] || VM_LOOK.pistol;
+  const mat = new THREE.MeshLambertMaterial({ color: spec.color });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x1c1f2a });
+  const L = spec.len;
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(spec.w, 0.13, L), mat);
+  body.position.set(0, 0, -L / 2 + 0.08);
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(spec.w * 0.82, 0.17, 0.14), dark);
+  grip.position.set(0, -0.15, 0.07);
+  const mag = new THREE.Mesh(new THREE.BoxGeometry(spec.w * 0.78, 0.15, spec.magLen), dark);
+  mag.position.set(0, -0.045, -0.05);
+  viewmodel.add(body, grip, mag);
+
+  if (weaponId === "sr") {
+    const scope = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.16), dark);
+    scope.position.set(0, 0.07, -0.1);
+    viewmodel.add(scope);
+  }
+}
+
+function applyViewModel(weaponId) {
+  if (!weaponId || !VM_LOOK[weaponId]) return;
+  if (state.lastViewModel === weaponId) return;
+  state.lastViewModel = weaponId;
+  buildViewModel(weaponId);
+  Sfx.switchW();
+}
 
 function makeViewModel() {
-  const g = new THREE.Group();
-  const mat = new THREE.MeshLambertMaterial({ color: 0x3a4258 });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x22262f });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.15, 0.62), mat);
-  body.position.set(0, 0, -0.25);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.18, 0.16), mat);
-  grip.position.set(0, -0.16, 0.02);
-  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.5), dark);
-  barrel.position.set(0, 0.03, -0.6);
-  g.add(body, grip, barrel);
-  g.position.set(0.28, -0.28, -0.5);
-  camera.add(g);
+  if (viewmodel) return viewmodel;
+  viewmodel = new THREE.Group();
+  viewmodel.position.set(0.28, -0.28, -0.5);
+  camera.add(viewmodel);
   scene.add(camera);
-  return g;
+  buildViewModel(state.myWeapon || "pistol");
+  return viewmodel;
 }
-const viewmodel = makeViewModel();
-viewmodel.position.set(0.28, -0.28, -0.5);
+makeViewModel();
 
 /* ------------- 세계 생성 ------------- */
 
@@ -514,11 +560,15 @@ function buyWeapon(id) {
   const w = state.weapons[id];
   if (!w) return;
   const cost = w.id === state.myWeapon ? 0 : w.price; // 서버와 동일: 현재 무기 재구매 무료
-  if (state.myMoney < cost) return;
+  if (state.myMoney < cost) {
+    flashBuyToast("크레딧 부족 — 구매할 수 없습니다");
+    Sfx.hurt();
+    return;
+  }
   socket.emit("game:buy", { weapon: id });
   state.myWeapon = id;
   state.myMoney = Math.max(0, state.myMoney - cost);
-  Sfx.buy();
+  applyViewModel(id); // 내부에서 무기 교체 효과음 재생
   refreshBuyGrid();
   ui.update();
   if (buyUIOpen()) closeBuyUI(false);
@@ -737,11 +787,11 @@ function refreshBuyGrid() {
     const cur = w.id === state.myWeapon;
     const priceTxt = w.price === 0 ? "무료" : w.price.toLocaleString();
     return `
-      <button class="ws-card${cur ? " sel" : ""}${afford ? "" : " poor"}" data-w="${w.id}" ${afford ? "" : "disabled"}>
+      <button class="ws-card${cur ? " sel" : ""}${afford ? "" : " poor"}" data-w="${w.id}">
         <div class="ws-icon">${w.icon || "🔫"}</div>
-        <div class="ws-name">${w.name}</div>
+        <div class="ws-name">${w.name}${cur ? ' <span class="ws-owned-tag">보유</span>' : ""}</div>
         <div class="ws-desc">${w.desc || ""}</div>
-        <div class="ws-stats">DMG ${w.body}-${w.head} · ${magText(w)} · ${w.priceTxt || ""}</div>
+        <div class="ws-stats">DMG ${w.body}-${w.head} · ${magText(w)}${afford ? "" : ' <span class="ws-note">크레딧 부족</span>'}</div>
         <div class="ws-price${cur ? " owned" : ""}">${priceTxt}</div>
       </button>`;
   }).join("");
@@ -750,6 +800,18 @@ function refreshBuyGrid() {
     b.addEventListener("click", () => buyWeapon(b.dataset.w));
   });
   $("#ws-money").textContent = myMoney.toLocaleString();
+}
+
+function flashBuyToast(text) {
+  const t = $("#ws-toast");
+  if (!t) return;
+  t.textContent = text;
+  t.classList.remove("hidden");
+  t.classList.remove("shake");
+  void t.offsetWidth;
+  t.classList.add("shake");
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.classList.add("hidden"), 1600);
 }
 
 function magText(w) {
@@ -927,6 +989,14 @@ socket.on("game:started", (d) => {
   state.joinBuyOpened = false;
   state.myTeam = d.me?.team || (d.state.players.find(p => p.id === state.myId)?.team) || null;
   state.kills = 0; state.deaths = 0;
+  state.alive = true;
+  state.ads = false;
+  state.firing = false;
+  state.cam.fov = 75;
+  camera.fov = 75;
+  camera.updateProjectionMatrix();
+  state.yaw = state.myTeam === "red" ? Math.PI : 0;
+  state.pitch = 0;
   state.spike = {
     carrierId: d.state.spike?.carrierId || null,
     dropped: !!(d.state.spike?.dropped),
@@ -956,6 +1026,12 @@ socket.on("game:sync", (d) => {
   state.map = d.map;
   state.weapons = d.weapons || {};
   state.inGame = true;
+  state.alive = true;
+  state.ads = false;
+  state.firing = false;
+  state.cam.fov = 75;
+  camera.fov = 75;
+  camera.updateProjectionMatrix();
   buildWorld(d.map);
   $("#lobby").classList.add("hidden");
   $("#hud").classList.remove("hidden");
@@ -977,7 +1053,10 @@ socket.on("game:state", (snap) => {
   if (mine) {
     state.myHP = mine.hp;
     state.myAmmo = mine.ammo;
-    state.myWeapon = mine.weapon;
+    if (mine.weapon && mine.weapon !== state.myWeapon) {
+      state.myWeapon = mine.weapon;
+      applyViewModel(mine.weapon);
+    }
     state.myMoney = mine.money;
     state.myReloading = mine.reloading;
     state.planting = mine.planting;
@@ -1038,15 +1117,25 @@ socket.on("round:start", (d) => {
   state.spike = { carrierId: null, dropped: false, dropX: 0, dropZ: 0, planted: false, plantX: 0, plantZ: 0, defusingId: null, defuseProgress: 0 };
   setDropMarker();
   $("#death-screen").classList.add("hidden");
+  state.ads = false;
+  state.firing = false;
+  state.cam.fov = 75;
+  camera.fov = 75;
+  camera.updateProjectionMatrix();
   showBanner(`ROUND ${d.round} — 구매 단계`, "info", 2000);
-  state.joinBuyOpened = false;
   state.alive = true;
+  state.joinBuyOpened = true;
+  // 새 라운드 스폰 방향으로 카메라 정렬 (발로란트: 라운드마다 시야 리셋)
+  state.yaw = state.myTeam === "red" ? Math.PI : 0;
+  state.pitch = 0;
   openBuyUI();
   ui.update();
 });
 
 socket.on("round:end", (d) => {
   state.phase = "roundover";
+  state.ads = false;
+  state.firing = false;
   const win = (d.winner === state.myTeam);
   const reason = d.reason === "elim" ? "전멸" : d.reason === "detonate" ? "폭발" : d.reason === "defuse" ? "해체" : "시간 초과";
   showBanner(win ? `ROUND 승리 · ${reason}` : `ROUND 패배 · ${reason}`, win ? "win" : "lose", 2400);
@@ -1061,7 +1150,12 @@ socket.on("game:phase", (d) => {
 });
 
 socket.on("game:buy", (d) => {
-  if (d.ok) state.myMoney = d.money;
+  // 서버 권위 상태로 동기화 — 성공 시 무기+머니 확정, 실패 시 낙관적 갱신 롤백
+  state.myMoney = typeof d.money === "number" ? d.money : state.myMoney;
+  if (d.ok && d.weapon && d.weapon !== state.myWeapon) {
+    state.myWeapon = d.weapon;
+    applyViewModel(d.weapon);
+  }
   ui.update();
   if (buyUIOpen()) refreshBuyGrid();
 });
@@ -1097,9 +1191,13 @@ socket.on("game:hurt", (d) => {
 });
 
 socket.on("game:kill", (d) => {
-  addEventLine(`<span class="killer ${d.killerTeam}">${esc(d.killerName)}</span><span class="victim"> → ${esc(d.victimName)}</span>${d.headshot ? '<span class="hs"> 헤드샷</span>' : ""}`);
+  const wk = d.weapon ? ` <span class="wk">${esc((state.weapons[d.weapon]?.name || d.weapon).toLowerCase())}</span>` : "";
+  addEventLine(`<span class="killer ${d.killerTeam}">${esc(d.killerName)}</span><span class="wl"> → </span><span class="victim">${esc(d.victimName)}</span>${wk}${d.headshot ? '<span class="hs"> 헤드샷</span>' : ""}`);
   if (d.victimId === state.myId) {
+    state.alive = false;
+    state.firing = false;
     showBanner("전사했습니다", "lose", 2000);
+    ui.update();
   }
 });
 
@@ -1151,6 +1249,11 @@ socket.on("bomb:detonate", (d) => {
 socket.on("game:ended", (d) => {
   state.inGame = false;
   state.phase = "finished";
+  state.ads = false;
+  state.firing = false;
+  state.cam.fov = 75;
+  camera.fov = 75;
+  camera.updateProjectionMatrix();
   clearMatchUI();
   $("#end-screen").classList.remove("hidden");
   const myWin = d.winner === state.myTeam;

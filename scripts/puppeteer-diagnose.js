@@ -82,7 +82,7 @@ function stDump() {
 
   try {
     await page.goto(BASE, { timeout: 30000, waitUntil: "domcontentloaded" });
-    await page.waitForFunction(() => window.__s !== undefined, { timeout: 15000 });
+    await page.waitForFunction(() => typeof window.__s === "function", { timeout: 30000 });
     console.log("[PAGE] loaded, __s hook available");
 
     await page.waitForSelector("#nickname", { visible: true, timeout: 10000 });
