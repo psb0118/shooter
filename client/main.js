@@ -631,7 +631,7 @@ function updateInteractHint() {
 
 function pointerLocked() { return document.pointerLockElement === renderer.domElement; }
 function tryLock() {
-  if (TOUCH || !state.inGame) return;
+  if (!state.inGame) return;
   const hasOverlay = !$("#lobby").classList.contains("hidden") ||
     !$("#weapon-select").classList.contains("hidden") ||
     !$("#end-screen").classList.contains("hidden") ||
@@ -645,7 +645,6 @@ function exitLock() {
 }
 
 document.addEventListener("pointerlockchange", () => {
-  if (TOUCH) return;
   if (!pointerLocked()) {
     state.firing = false;
     state.ads = false;
@@ -665,7 +664,9 @@ document.addEventListener("mousemove", (e) => {
 });
 
 renderer.domElement.addEventListener("mousedown", (e) => {
-  if (TOUCH || !state.inGame || state.uiLock || buyUIOpen()) return;
+  if (!state.inGame || state.uiLock || buyUIOpen()) return;
+  // 터치 장치에서 터치가 만들어낸 합성 mousedown(detail=0)은 무시 (스와이프 시야와 혼동 방지)
+  if (TOUCH && e.detail === 0) return;
   if (!pointerLocked()) { tryLock(); return; }
   if (e.button === 0) state.firing = true;
   else if (e.button === 2) state.ads = true;
@@ -680,6 +681,7 @@ window.addEventListener("contextmenu", (e) => e.preventDefault());
 
 const joy = { active: false, ox: 0, oy: 0, id: -1 };
 const btnTimer = new Map();
+const look = { active: false, id: -1, lx: 0, ly: 0 };
 
 function resetJoy() {
   joy.active = false; joy.id = -1;
@@ -719,7 +721,8 @@ document.addEventListener("touchstart", (e) => {
       else if (id === "btn-interact") startInteract(true);
       btnTimer.set(t.identifier, id);
     } else {
-      if (document.pointerLockElement !== renderer.domElement && !TOUCH) {}
+      // 나머지 화면 영역 → 스와이프로 시야 회전
+      look.active = true; look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
     }
   }
 }, { passive: false });
@@ -729,12 +732,20 @@ document.addEventListener("touchmove", (e) => {
   e.preventDefault();
   for (const t of e.changedTouches) {
     if (joy.active && t.identifier === joy.id) updateJoy(t);
+    else if (look.active && t.identifier === look.id) {
+      const dx = t.clientX - look.lx;
+      const dy = t.clientY - look.ly;
+      look.lx = t.clientX; look.ly = t.clientY;
+      state.yaw -= dx * TOUCH_SENS;
+      state.pitch = clamp(state.pitch - dy * TOUCH_SENS, -1.52, 1.52);
+    }
   }
 }, { passive: false });
 
 document.addEventListener("touchend", (e) => {
   for (const t of e.changedTouches) {
     if (joy.active && t.identifier === joy.id) resetJoy();
+    if (look.active && t.identifier === look.id) { look.active = false; look.id = -1; }
     if (btnTimer.has(t.identifier)) {
       const id = btnTimer.get(t.identifier);
       btnTimer.delete(t.identifier);
@@ -746,6 +757,7 @@ document.addEventListener("touchend", (e) => {
 document.addEventListener("touchcancel", (e) => {
   for (const t of e.changedTouches) {
     if (joy.active && t.identifier === joy.id) resetJoy();
+    if (look.active && t.identifier === look.id) { look.active = false; look.id = -1; }
     if (btnTimer.has(t.identifier)) {
       const id = btnTimer.get(t.identifier);
       btnTimer.delete(t.identifier);
@@ -1124,6 +1136,7 @@ socket.on("round:start", (d) => {
   camera.updateProjectionMatrix();
   showBanner(`ROUND ${d.round} — 구매 단계`, "info", 2000);
   state.alive = true;
+  state.myHP = 150;
   state.joinBuyOpened = true;
   // 새 라운드 스폰 방향으로 카메라 정렬 (발로란트: 라운드마다 시야 리셋)
   state.yaw = state.myTeam === "red" ? Math.PI : 0;
