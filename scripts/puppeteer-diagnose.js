@@ -39,10 +39,21 @@ function waitUp(ms) {
   });
 }
 
+// 새 클라이언트 상태 접근자 헬퍼
+function stDump() {
+  const s = window.__s();
+  return JSON.stringify({
+    inGame: s.inGame, phase: s.phase, round: s.round, myTeam: s.myTeam, myHP: s.myHP, myWeapon: s.myWeapon, myMoney: s.myMoney, alive: s.alive,
+    x: +s.x.toFixed(2), z: +s.z.toFixed(2), yaw: +s.yaw.toFixed(3), pitch: +s.pitch.toFixed(3),
+    spike: { planted: s.spike && s.spike.planted, carrier: s.spike && s.spike.carrierId, pos: s.spike && s.spike.placed ? (s.spike.x + "," + s.spike.z) : null },
+    keys: { ...s.keys },
+  });
+}
+
 (async () => {
   if (!(await waitUp(10000))) {
     console.log("[FAIL] server did not come up");
-    server.kill();
+    if (server) server.kill();
     process.exit(1);
   }
   console.log("[SERVER] up at " + BASE);
@@ -58,10 +69,16 @@ function waitUp(ms) {
 
   const logs = [];
   page.on("console", (m) => logs.push(`[console.${m.type()}] ${m.text()}`));
-  page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}\n${(e.stack || "").split("\n").slice(0, 6).join("\n")}`));
+  page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}\n${(e.stack || "").split("\n").slice(0, 8).join("\n")}`));
   page.on("response", (r) => {
     if (r.status() >= 400) logs.push(`[http ${r.status()}] ${r.url()}`);
   });
+
+  let fails = 0;
+  const check = (label, ok, extra) => {
+    console.log(`[${ok ? "PASS" : "FAIL"}] ${label}${extra ? "  " + extra : ""}`);
+    if (!ok) fails++;
+  };
 
   try {
     await page.goto(BASE, { timeout: 30000, waitUntil: "domcontentloaded" });
@@ -72,146 +89,128 @@ function waitUp(ms) {
     await page.$eval("#nickname", (el) => (el.value = "진단용"));
     await page.click("#btn-create");
     await page.waitForSelector("#btn-start:not(.hidden)", { visible: true, timeout: 15000 });
-    console.log("[LOBBY] room created, start button visible");
     await page.click("#btn-start");
 
     await page.waitForSelector("#hud:not(.hidden)", { visible: true, timeout: 15000 });
-    console.log("[GAME] HUD visible => in game");
-
-    // --- 무기 선택 오버레이 ---
     await page.waitForSelector("#weapon-select:not(.hidden)", { visible: true, timeout: 8000 });
+    console.log("[GAME] HUD + buy overlay auto-open OK");
+
+    const st0 = JSON.parse(await page.evaluate(stDump));
+    check("구매 오버레이/초기 P1 상태", st0.phase === "buy" && st0.myMoney === 800 && st0.myHP === 150, `phase=${st0.phase} money=${st0.myMoney} hp=${st0.myHP}`);
+
     const ws = await page.evaluate(() => ({
-      weapons: Object.keys(window.__s.weapons || {}),
-      locked: document.pointerLockElement !== null,
-      selectLock: window.__s.selectLock,
+      weapons: Object.keys(window.__s().weapons || {}),
+      cards: [...document.querySelectorAll(".ws-card")].length,
+      poor: document.querySelectorAll(".ws-card.poor").length,
+      money: document.getElementById("ws-money").textContent,
     }));
-    console.log("[WEAPON-SELECT] shown", JSON.stringify(ws));
-    if (ws.weapons.length < 4) console.log("  !! weapons < 4");
+    check("무기 그리드 5종/가격표시", ws.weapons.length === 5 && ws.cards === 5 && ws.money === "800" && ws.poor >= 4,
+      `weapons=${ws.weapons.join(",")} cards=${ws.cards} poor=${ws.poor} money=${ws.money}`);
 
-    await page.waitForSelector('.ws-card[data-w="sg"]', { visible: true, timeout: 5000 });
-    await page.click('.ws-card[data-w="sg"]');
+    // 권총(무료) 구매 — 상태 그대로 폐쇄 + 리락 시도
+    await page.click('.ws-card[data-w="pistol"]');
     await new Promise((r) => setTimeout(r, 600));
-    const afterPick = await page.evaluate(() => ({
-      myWeapon: window.__s.myWeapon,
-      locked: document.pointerLockElement !== null,
-      selectHidden: document.getElementById("weapon-select").classList.contains("hidden"),
-    }));
-    console.log("[WEAPON-PICK sg]", JSON.stringify(afterPick));
-    if (afterPick.myWeapon !== "sg" || !afterPick.locked || !afterPick.selectHidden) console.log("  !! pick/lock 문제");
-
-    await new Promise((r) => setTimeout(r, 1500));
-
-    const dump = await page.evaluate(() => {
-      const s = window.__s;
-      return {
-        inGame: s.inGame,
-        myAlive: s.myAlive,
-        myWeapon: s.myWeapon,
-        pos: { x: +s.myPred.x.toFixed(2), z: +s.myPred.z.toFixed(2) },
-        yaw: +s.myPred.yaw.toFixed(3),
-        pitch: +s.myPred.pitch.toFixed(3),
-        keys: { ...s.keys },
-      };
+    const afterPick = await page.evaluate(() => {
+      const s = window.__s();
+      return { myWeapon: s.myWeapon, closed: document.getElementById("weapon-select").classList.contains("hidden"), money: s.myMoney };
     });
-    console.log("[INIT]", JSON.stringify(dump));
+    check("무료 권총 구매 무결성", afterPick.myWeapon === "pistol" && afterPick.closed && afterPick.money === 800, JSON.stringify(afterPick));
 
-    const lockBefore = await page.evaluate(() => document.pointerLockElement !== null);
-    console.log("[POINTERLOCK before click]", lockBefore);
+    // P 키 토글 (닫혀있음 → 열림 → 닫힘)
+    const p0 = await page.evaluate(() => document.getElementById("weapon-select").classList.contains("hidden"));
+    await page.keyboard.press("KeyP");
+    await new Promise((r) => setTimeout(r, 400));
+    const pOpen = await page.evaluate(() => !document.getElementById("weapon-select").classList.contains("hidden"));
+    await page.keyboard.press("KeyP");
+    await new Promise((r) => setTimeout(r, 400));
+    const pClose = await page.evaluate(() => document.getElementById("weapon-select").classList.contains("hidden"));
+    check("P 키 구매 토글", p0 && pOpen && pClose, `closed=${p0} open=${pOpen} close=${pClose}`);
 
-    await page.mouse.click(640, 400, { button: "left" });
-    await new Promise((r) => setTimeout(r, 800));
-    const lockAfter = await page.evaluate(() => document.pointerLockElement !== null);
-    console.log("[POINTERLOCK after click]", lockAfter);
+    // combat 전환 대기 후 P 무효(구매 단계 게이트)
+    await page.waitForFunction(() => { const s = window.__s(); return s.phase === "combat" && s.round === 1; }, { timeout: 25000 });
+    await new Promise((r) => setTimeout(r, 300));
+    await page.keyboard.press("KeyP");
+    await new Promise((r) => setTimeout(r, 400));
+    const pCombat = await page.evaluate(() => document.getElementById("weapon-select").classList.contains("hidden"));
+    check("combat에서 구매차단(P 무효)", pCombat);
 
-    const start = await page.evaluate(() => ({ x: window.__s.myPred.x, z: window.__s.myPred.z, yaw: window.__s.myPred.yaw }));
+    // 이동 — 예측/서버 에코 (포인터 락과 무관하게 키입력으로 서버 이동)
+    const start = JSON.parse(await page.evaluate(stDump));
     await page.keyboard.down("KeyW");
-    await new Promise((r) => setTimeout(r, 1200));
+    await new Promise((r) => setTimeout(r, 1500));
     await page.keyboard.up("KeyW");
-    await new Promise((r) => setTimeout(r, 400));
-    const end = await page.evaluate(() => ({ x: window.__s.myPred.x, z: window.__s.myPred.z, yaw: window.__s.myPred.yaw, keys: { ...window.__s.keys } }));
-    console.log("[W-MOVE] start", JSON.stringify(start));
-    console.log("[W-MOVE] end", JSON.stringify(end));
+    await new Promise((r) => setTimeout(r, 500));
+    const end = JSON.parse(await page.evaluate(stDump));
+    const dist = Math.hypot(end.x - start.x, end.z - start.z);
+    check("W 이동(서버 에코)", dist > 1.0, `dist=${dist.toFixed(2)} start=(${start.x},${start.z}) end=(${end.x},${end.z})`);
 
-    const dist = +Math.hypot(end.x - start.x, end.z - start.z).toFixed(3);
-    console.log("[W-MOVE] dist=" + dist + (dist > 1 ? " => moved OK" : " => NOT moving"));
+    // 스트레이프 방향: yaw=π(남쪽) 기준 A=-X / D=+X (봇이 막으면 재시도)
+    async function pressMove(key) {
+      let best = 0;
+      for (let i = 0; i < 4; i++) {
+        const x0 = JSON.parse(await page.evaluate(stDump)).x;
+        await page.keyboard.down(key);
+        await new Promise((r) => setTimeout(r, 800));
+        await page.keyboard.up(key);
+        await new Promise((r) => setTimeout(r, 350));
+        const dx = JSON.parse(await page.evaluate(stDump)).x - x0;
+        best = Math.abs(dx) > Math.abs(best) ? dx : best;
+        if (Math.abs(best) > 0.3) break;
+      }
+      return best;
+    }
+    const dxA = await pressMove("KeyA");
+    const dxD = await pressMove("KeyD");
+    check("A/D 스트레이프 방향", dxA < -0.3 && dxD > 0.3, `dA=${dxA.toFixed(2)} dD=${dxD.toFixed(2)}`);
 
-    // A 스트레이프 방향: yaw=π(남쪽 응시)에서 A=왼쪽(-X), D=오른쪽(+X)
-    const posA0 = await page.evaluate(() => ({ x: window.__s.myPred.x, z: window.__s.myPred.z, yaw: window.__s.myPred.yaw }));
-    await page.keyboard.down("KeyA");
-    await new Promise((r) => setTimeout(r, 700));
-    await page.keyboard.up("KeyA");
-    const posA1 = await page.evaluate(() => window.__s.myPred.x);
-    const aDx = +(posA1 - posA0.x).toFixed(3);
-    console.log("[STRAFE-A] facing yaw=" + +posA0.yaw.toFixed(2) + " dx=" + aDx + (aDx < -0.5 ? " => LEFT OK" : " => WRONG DIR"));
-
-    const posD0 = await page.evaluate(() => window.__s.myPred.x);
-    await page.keyboard.down("KeyD");
-    await new Promise((r) => setTimeout(r, 700));
-    await page.keyboard.up("KeyD");
-    const posD1 = await page.evaluate(() => window.__s.myPred.x);
-    const dDx = +(posD1 - posD0).toFixed(3);
-    console.log("[STRAFE-D] dx=" + dDx + (dDx > 0.5 ? " => RIGHT OK" : " => WRONG DIR"));
-
-    const y0 = await page.evaluate(() => window.__s.myPred.yaw);
-    await page.keyboard.down("ArrowRight");
-    await new Promise((r) => setTimeout(r, 400));
-    await page.keyboard.up("ArrowRight");
-    const y1 = await page.evaluate(() => window.__s.myPred.yaw);
-    console.log("[LOOK arrowR] yaw", +y0.toFixed(3), "->", +y1.toFixed(3), "delta", +(y1 - y0).toFixed(3));
-
-    console.log("[TITLE]", await page.$eval("title", (t) => t.textContent));
-
-    // 포인터 락 활성 상태에서 마우스 오른쪽 이동 = 시야 오른쪽 회전 (yaw 감소) 확인
+    // 발사 — 포인터 락 상태에서만 유효 (headless에선 선택 적용)
     if (await page.evaluate(() => document.pointerLockElement !== null)) {
-      const y0 = await page.evaluate(() => window.__s.myPred.yaw);
+      const ammo0 = await page.evaluate(() => window.__s().myAmmo);
+      await page.mouse.down({ button: "left" });
+      await new Promise((r) => setTimeout(r, 1200));
+      await page.mouse.up({ button: "left" });
+      const ammo1 = await page.evaluate(() => window.__s().myAmmo);
+      check("발사 탄약 감소", ammo1 < ammo0, `ammo ${ammo0}->${ammo1}`);
+    } else {
+      console.log("[FIRE] pointer lock 비활성 — 사격 확인 생략");
+    }
+
+    // ADS — 포인터 락 되면 확대 확인 (실패해도 치명 X)
+    const locked = await page.evaluate(() => document.pointerLockElement !== null);
+    if (locked) {
+      await page.mouse.down({ button: "right" });
+      await new Promise((r) => setTimeout(r, 300));
+      const fov = await page.evaluate(() => +window.__s.camera.fov.toFixed(1));
+      await page.mouse.up({ button: "right" });
+      check("ADS 확대", fov < 60, `fov=${fov}`);
       await page.mouse.move(700, 500, { steps: 8 });
       await page.mouse.move(900, 500, { steps: 8 });
-      const y1 = await page.evaluate(() => window.__s.myPred.yaw);
-      console.log("[LOOK mouse-right] yaw", +y0.toFixed(3), "->", +y1.toFixed(3), (y1 < y0 ? "=> turn RIGHT OK" : "=> WRONG (inverted)"));
+    } else {
+      console.log("[ADS] pointer lock 비활성 — 확인 생략");
     }
 
-    // --- ADS 우클릭 확대 ---
-    if (await page.evaluate(() => document.pointerLockElement !== null)) {
-      await page.mouse.down({ button: "right" });
-      await new Promise((r) => setTimeout(r, 400));
-      const adsOn = await page.evaluate(() => window.__s.ads);
-      const fovOn = await page.evaluate(() => (+window.__s.camera.fov.toFixed(1)));
-      await page.mouse.up({ button: "right" });
-      await new Promise((r) => setTimeout(r, 300));
-      const adsOff = await page.evaluate(() => window.__s.ads);
-      console.log("[ADS] ads=" + adsOn + " fov=" + fovOn + " off=" + adsOff + (adsOn && !adsOff && fovOn < 60 ? " => OK" : " => FAIL"));
-    }
+    // 라운드 2 진입까지 대기 (HUD 라운드/머니 갱신 확인)
+    await page.waitForFunction(() => window.__s().round >= 2 && window.__s().phase === "buy", { timeout: 120000 });
+    const r2 = JSON.parse(await page.evaluate(stDump));
+    check("라운드 2 자동 구매창 재오픈", r2.phase === "buy" && r2.myHP === 150, `round=${r2.round} hp=${r2.myHP} money=${r2.myMoney}`);
 
-    // --- P 키 무기 선택 토글 ---
-    await page.keyboard.press("KeyP");
-    await new Promise((r) => setTimeout(r, 400));
-    const pOpen = await page.evaluate(() => ({
-      shown: !document.getElementById("weapon-select").classList.contains("hidden"),
-      locked: document.pointerLockElement !== null,
-    }));
-    await page.keyboard.press("KeyP");
-    await new Promise((r) => setTimeout(r, 400));
-    const pClose = await page.evaluate(() => ({
-      shown: !document.getElementById("weapon-select").classList.contains("hidden"),
-      locked: document.pointerLockElement !== null,
-    }));
-    console.log("[KEY-P] open=" + JSON.stringify(pOpen) + " close=" + JSON.stringify(pClose) +
-      (pOpen.shown && !pOpen.locked && !pClose.shown && pClose.locked ? " => OK" : " => FAIL"));
-
-    await new Promise((r) => setTimeout(r, 600));
+    console.log("[SHOT] saving...");
     await page.screenshot({ path: "scripts/diagnose-shot.png" });
-    console.log("[SHOT] saved scripts/diagnose-shot.png");
+
+    console.log(`\n======= 진단 결과: ${fails === 0 ? "ALL PASS" : fails + " FAIL" } =======`);
   } catch (err) {
     console.log("[FAIL]", err.stack || err.message);
+    fails++;
   }
 
   console.log("==================== BROWSER LOGS ====================");
   logs.forEach((l) => console.log(l));
   if (logs.length === 0) console.log("(no console/page errors)");
+  console.log(`EXIT_CODE=${fails === 0 ? 0 : 1}`);
 
   await browser.close();
   if (server) server.kill();
-  process.exit(0);
+  process.exit(fails === 0 ? 0 : 1);
 })().catch((e) => {
   console.error("DIAGNOSE FATAL", e);
   if (server) server.kill();

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Shooter — 3D FPS 팀 데스매치</title>
+  <title>Shooter — 5v5 전술 슈터</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -13,7 +13,7 @@
   <div id="lobby" class="overlay">
     <div class="lobby-box">
       <h1>🎯 SHOOTER</h1>
-      <p class="sub">3D FPS 팀 데스매치</p>
+      <p class="sub">5v5 전술 슈터 · 발로란트식 라운드</p>
 
       <div class="lobby-row">
         <input id="nickname" maxlength="16" placeholder="닉네임" autocomplete="off" />
@@ -34,7 +34,7 @@
       <div id="lobby-room" class="hidden">
         <div class="room-code-label">방 코드</div>
         <div id="room-code" class="room-code"></div>
-        <div class="lobby-note">코드를 친구에게 공유하세요.<br />PC: WASD 이동 · Shift 달리기 · 마우스 조준(클릭) · LMB 사격 · R 재장전 · 1/2/3 무기<br />모바일: 왼쪽 조이스틱 이동 · 오른쪽 드래그 조준 · 🔫 발사 · ↻ 재장전 · ⚔️ 무기</div>
+        <div class="lobby-note">방 코드를 친구에게 공유하세요.<br />먼저 <b>13라운드</b>를 이기면 승리! 스파이크를 설치하고 폭발시키세요.<br />PC: WASD 이동 · Shift 달리기 · LMB 사격 · 우클릭 조준(ADS) · R 재장전 · <b>E 설치/해체</b> · 1~5 무기 구매 · P 구매창<br />모바일: 왼쪽 조이스틱 이동 · 오른쪽 드래그 조준 · 🔫 발사 · ↻ 재장전 · ✋ 설치/해체</div>
         <div id="player-list" class="player-list"></div>
         <button id="btn-start" class="btn primary big hidden">게임 시작</button>
       </div>
@@ -48,11 +48,11 @@
     </div>
   </div>
 
-  <!-- ==================== 무기 선택 ==================== -->
+  <!-- ==================== 무기 선택 (구매) ==================== -->
   <div id="weapon-select" class="overlay weapons hidden">
     <div class="ws-box">
-      <h2>무기 선택</h2>
-      <p class="ws-sub">마우스로 클릭해서 장착하세요 · 게임 중 <b>P</b> 키로 다시 열기</p>
+      <h2>무기 구매</h2>
+      <p class="ws-sub">구매 단계에만 가능 · 게임 중 <b>P</b> 키로 최대한 활용 · 지갑: <b id="ws-money">800</b></p>
       <div id="ws-grid"></div>
     </div>
   </div>
@@ -62,6 +62,7 @@
     <div id="joy-base">
       <div id="joy-knob"></div>
     </div>
+    <div id="btn-interact" class="btn-control">✋</div>
     <div id="btn-swap" class="btn-control">⚔️</div>
     <div id="btn-reload" class="btn-control">↻</div>
     <div id="btn-fire" class="btn-control">🔫</div>
@@ -71,37 +72,53 @@
   <div id="hud" class="hidden">
     <div id="crosshair"><div class="dot"></div></div>
 
+    <div id="round-banner" class="hidden"></div>
+
     <div id="scoreboard">
       <span id="score-red" class="team red">0</span>
       <span id="score-dash">:</span>
       <span id="score-blue" class="team blue">0</span>
+      <span id="round-num">R1</span>
+      <span id="phase-label">구매</span>
       <span id="timer">--:--</span>
+    </div>
+
+    <div id="spike-status" class="hidden">💣 00:45</div>
+
+    <div id="money-wrap">
+      <span id="money">800</span>
     </div>
 
     <div id="my-team-tag"></div>
 
     <div id="healthbar-wrap">
-      <div class="label">HP</div>
+      <div class="label">HP <span id="hp-num">150</span></div>
       <div id="healthbar"><div id="healthfill"></div></div>
     </div>
     <div id="kd">0/0</div>
 
     <div id="weapon-hud">
-      <div id="weapon-name">AR</div>
-      <div id="ammo">30 / ∞</div>
+      <div id="weapon-name">PISTOL</div>
+      <div id="ammo">12 / ∞</div>
     </div>
 
     <div id="killfeed"></div>
 
+    <div id="interact-hint" class="hidden">
+      <span class="key">E</span><span id="interact-text">스파이크 설치</span>
+      <div id="interact-progress"><div id="interact-fill"></div></div>
+    </div>
+
     <div id="hitmarker" class="hidden">✕</div>
     <div id="damage-vignette"></div>
+    <div id="explosion-flash" class="hidden"></div>
   </div>
 
   <!-- ==================== 사망 / 종료 ==================== -->
   <div id="death-screen" class="overlay death hidden">
     <div class="death-box">
       <p class="big">전사했습니다</p>
-      <p class="small">잠시 후 부활합니다…</p>
+      <p class="small">이번 라운드는 더 이상 참여할 수 없습니다.<br />다음 라운드에 부활합니다…</p>
     </div>
   </div>
 

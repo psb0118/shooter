@@ -1,78 +1,132 @@
 "use strict";
 
 /* =========================================================
-   server/game.js — 팀 데스매치 3D FPS 게임 엔진
+   server/game.js — 라운드제 5v5 전술 슈터 게임 엔진
+   (발로란트 감성: 스파이크 설치/해체, 라운드당 1생명, 경제)
 ========================================================= */
 
 const TICK_RATE = 30;
-const STATE_RATE = 15;       // 상태 브로드캐스트 (Hz)
-const STATE_TICK = TICK_RATE / STATE_RATE; // 매 N 틱마다 스냅샷 전송
-const MATCH_TIME = 240;      // 4분
-const KILL_LIMIT = 20;
-const RESPAWN_DELAY = 3.0;
+const STATE_RATE = 15;
+const STATE_TICK = TICK_RATE / STATE_RATE;
+
+/* ---- 라운드/시간 ---- */
+const BUY_TIME = 12;            // 구매 단계 (초)
+const ROUND_TIME = 100;         // 전투 라운드 시간 (초)
+const SPIKE_TIME = 45;          // 설치 후 폭발 카운트다운 (초)
+const SPIKE_PLANT_TIME = 1.5;   // 설치 홀드 시간
+const SPIKE_DEFUSE_TIME = 7;    // 해체 홀드 시간
+const ROUND_OVER_TIME = 6;      // 라운드 종료 화면 (초)
+const ROUNDS_TO_WIN = 13;       // 발로란트식 선 13승
+
+/* ---- 경제 (발로란트 감성) ---- */
+const START_MONEY = 800;
+const MAX_MONEY = 9000;
+const MONEY_KILL = 200;
+const MONEY_PLANT = 300;
+const MONEY_ROUND_WIN = 3000;
+const MONEY_LOSS_BASE = 1900;
+const MONEY_LOSS_STEP = 500;
+const MONEY_LOSS_MAX = 2900;
+
+/* ---- 이동/사격 ---- */
 const PLAYER_RADIUS = 0.45;
 const EYE_HEIGHT = 1.6;
 const MOVE_SPEED = 5.5;
 const SPRINT_MULT = 1.55;
 const ACCEL = 12;
 const SHOT_RANGE = 250;
-const HEADSHOT_MULT = 1.5;
+const MAX_HP = 150;
+
+function clamp(v, mn, mx) { return v < mn ? mn : v > mx ? mx : v; }
+function dist2(ax, az, bx, bz) { const dx = ax - bx, dz = az - bz; return Math.sqrt(dx * dx + dz * dz); }
+function rnd(n) { return Math.floor(Math.random() * n); }
 
 /* =========================================================
    무기 정의
+   body/head/legs = 부위별 데미지, price = 구매 가격([0]권총 무료)
 ========================================================= */
 
 const WEAPONS = {
-  smg: { id: "smg",  name: "SMG",     dmg: 6,  cadence: 0.115, spread: 0.018, magSize: 30, reloadTime: 1.6, auto: true  },
-  ar:  { id: "ar",   name: "AR",      dmg: 11, cadence: 0.125, spread: 0.005, magSize: 30, reloadTime: 2.0, auto: true  },
-  sr:  { id: "sr",   name: "SNIPER",  dmg: 55, cadence: 1.05,  spread: 0.0,   magSize: 5,  reloadTime: 2.6, auto: false },
-  sg:  { id: "sg",   name: "SHOTGUN", dmg: 9,  cadence: 0.9,   spread: 0.085, magSize: 6,  reloadTime: 2.2, auto: false, pellets: 6, range: 45 },
+  pistol: { id: "pistol", name: "PISTOL",   price: 0,    body: 26, head: 104, legs: 22, cadence: 0.28,  spread: 0.02,  magSize: 12, reloadTime: 1.5, auto: false },
+  smg:    { id: "smg",    name: "SMG",      price: 1600, body: 22, head: 88,  legs: 19, cadence: 0.085, spread: 0.024, magSize: 30, reloadTime: 1.7, auto: true,  falloff: { from: 20, to: 40, min: 0.7 } },
+  ar:     { id: "ar",     name: "AR",       price: 2900, body: 30, head: 120, legs: 26, cadence: 0.115, spread: 0.007, magSize: 30, reloadTime: 2.0, auto: true,  falloff: { from: 30, to: 55, min: 0.8 } },
+  sr:     { id: "sr",     name: "SNIPER",   price: 4700, body: 99, head: 150, legs: 85, cadence: 1.1,   spread: 0.0,   magSize: 5,  reloadTime: 2.6, auto: false },
+  sg:     { id: "sg",     name: "SHOTGUN",  price: 900,  body: 17, head: 68,  legs: 15, cadence: 0.9,   spread: 0.1,   magSize: 6,  reloadTime: 2.2, auto: false, pellets: 8, range: 40 },
 };
 
 /* =========================================================
-   맵 정의 — 중앙 구조물 + 팀 스폰
+   맵 정의 — 104×104, A/B 사이트, 공격(-z) ↔ 수비(+z)
 ========================================================= */
 
 const MAP = {
-  halfSize: 34,
+  halfSize: 52,
   wallHeight: 5.5,
   obstacles: [
-    { x:  0,  z:  0,  w: 10, d: 10 },
-    { x: -14, z: -6,  w:  6, d: 14 },
-    { x:  14, z: -14, w: 14, d:  6 },
-    { x: -14, z:  8,  w: 14, d:  6 },
-    { x:  12, z:  12, w:  8, d:  6 },
-    { x: -22, z:  0,  w:  4, d: 12 },
-    { x:  22, z:  0,  w:  4, d: 12 },
-    { x:  0,  z: -20, w: 12, d:  4 },
-    { x:  0,  z:  20, w: 12, d:  4 },
+    // 중앙 구조물
+    { x:  0,  z:  2,  w: 12, d: 12 },
+    { x:  0,  z: 16,  w:  8, d:  8 },
+    { x:  0,  z:-14,  w: 10, d: 10 },
+    // 동/서 레인 분리 벽
+    { x:-18,  z: -4,  w:  3, d: 22 },
+    { x: 18,  z: -4,  w:  3, d: 22 },
+    // 레인 중간 커버
+    { x:-32,  z: -8,  w:  6, d:  6 },
+    { x: 32,  z: -8,  w:  6, d:  6 },
+    // 사이트 진입 근접 커버 (접근 렌을 막지 않도록 렌 바깥쪽으로)
+    { x:-30,  z: 14,  w:  4, d:  8 },
+    { x: 30,  z: 14,  w:  4, d:  8 },
+    // 사이트 A 방어 커버
+    { x:-30,  z: 30,  w:  6, d:  6 },
+    { x:-18,  z: 24,  w:  6, d:  6 },
+    // 사이트 B 방어 커버
+    { x: 30,  z: 30,  w:  6, d:  6 },
+    { x: 18,  z: 24,  w:  6, d:  6 },
+    // 공격측 등진 커버 (렌 한가운데를 막지 않도록 외곽 벽에 붙임)
+    { x:-34,  z:-30,  w:  4, d:  8 },
+    { x: 34,  z:-30,  w:  4, d:  8 },
+    { x:-14,  z:-30,  w:  8, d:  6 },
+    { x: 14,  z:-30,  w:  8, d:  6 },
+    // 수비측 배후 커버
+    { x:-30,  z: 44,  w: 10, d:  4 },
+    { x: 30,  z: 44,  w: 10, d:  4 },
+    // 넓은 플랭크 벽
+    { x:-42,  z: -8,  w:  4, d: 30 },
+    { x: 42,  z: -8,  w:  4, d: 30 },
   ],
   spawns: {
-    red:  [
-      { x: -22, z: -22 },
-      { x:  -6, z: -26 },
-      { x:   6, z: -26 },
-      { x:  22, z: -22 },
+    attack: [
+      { x: -24, z: -44 },
+      { x:  -8, z: -44 },
+      { x:   0, z: -44 },
+      { x:   8, z: -44 },
+      { x:  24, z: -44 },
     ],
-    blue: [
-      { x: -22, z:  22 },
-      { x:  -6, z:  26 },
-      { x:   6, z:  26 },
-      { x:  22, z:  22 },
+    defend: [
+      { x: -24, z:  44 },
+      { x:  -8, z:  44 },
+      { x:   0, z:  44 },
+      { x:   8, z:  44 },
+      { x:  24, z:  44 },
+    ],
+  },
+  // 스파이크 설치 구역 (A/B)
+  sites: {
+    A: { cx: -24, cz: 32, w: 6, d: 6 },
+    B: { cx:  24, cz: 32, w: 6, d: 6 },
+  },
+  // 봇 내비게이션용 접근 경로
+  waypoints: {
+    A: [
+      { x: -28, z: -36 }, { x: -28, z: -18 }, { x: -26, z: 6 }, { x: -24, z: 22 }, { x: -24, z: 30 },
+    ],
+    B: [
+      { x: 28, z: -36 }, { x: 28, z: -18 }, { x: 26, z: 6 }, { x: 24, z: 22 }, { x: 24, z: 30 },
     ],
   },
 };
 
 /* =========================================================
    수학 유틸
-========================================================= */
-
-function clamp(v, mn, mx) { return v < mn ? mn : v > mx ? mx : v; }
-
-/* =========================================================
-   광선-박스 교차 (카우스트 슬래브 알고리즘)
-   box = {x, z, w, d} (y: 0 ~ wallHeight)
-  озвращает t (≥0) 또는 null
 ========================================================= */
 
 function rayBox(ox, oy, oz, dx, dy, dz, box) {
@@ -99,11 +153,6 @@ function rayBox(ox, oy, oz, dx, dy, dz, box) {
   return t0 > 0 ? t0 : 0;
 }
 
-/* =========================================================
-   광선-구 교차 (플레이어 히트)
-   returns t (≥0) 또는 null
-========================================================= */
-
 function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
   const ax = ox - cx, ay = oy - cy, az = oz - cz;
   const a = dx * dx + dy * dy + dz * dz;
@@ -118,10 +167,6 @@ function raySphere(ox, oy, oz, dx, dy, dz, cx, cy, cz, r) {
   return t;
 }
 
-/* =========================================================
-   충돌 해소 — 원형 플레이어 vs AABB 장애물
-========================================================= */
-
 function circleAABB(px, pz, r, box) {
   const hx = box.w / 2, hz = box.d / 2;
   const cx = clamp(px, box.x - hx, box.x + hx);
@@ -130,7 +175,6 @@ function circleAABB(px, pz, r, box) {
   const d2 = dx * dx + dz * dz;
   if (d2 < r * r) {
     if (d2 < 1e-10) {
-      // 플레이어 중심이 박스 안에 — 가장 얇은 축으로 밀어냄
       const penX = (px < box.x ? box.x - hx - r : box.x + hx + r) - px;
       const penZ = (pz < box.z ? box.z - hz - r : box.z + hz + r) - pz;
       if (Math.abs(penX) < Math.abs(penZ)) { px += penX; } else { pz += penZ; }
@@ -145,29 +189,47 @@ function circleAABB(px, pz, r, box) {
   return [px, pz];
 }
 
+function inPlantZone(p) {
+  for (const key of ["A", "B"]) {
+    const s = MAP.sites[key];
+    if (Math.abs(p.x - s.cx) < s.w / 2 + 0.6 && Math.abs(p.z - s.cz) < s.d / 2 + 0.6) return true;
+  }
+  return false;
+}
+
+function lossBonus(streak) {
+  return Math.min(MONEY_LOSS_MAX, MONEY_LOSS_BASE + (streak > 0 ? (streak - 1) * MONEY_LOSS_STEP : 0));
+}
+
 /* =========================================================
-   새 플레이어 생성
+   플레이어 생성
 ========================================================= */
 
 function createPlayer(id, nickname, team, spawnIndex) {
-  const spawnPool = MAP.spawns[team];
-  const s = spawnPool[spawnIndex % spawnPool.length];
+  const role = team === "red" ? "attack" : "defend";
+  const s = MAP.spawns[role][spawnIndex % MAP.spawns[role].length];
   return {
     id,
     nickname: nickname || "플레이어",
     team,
     x: s.x, y: 0, z: s.z,
-    yaw: team === "red" ? Math.PI : 0,
+    yaw: role === "attack" ? Math.PI : 0,
     pitch: 0,
     vx: 0, vz: 0,
-    hp: 100,
+    hp: MAX_HP,
     alive: true,
-    respawnAt: 0,
-    weapon: "ar",
-    ammo: WEAPONS.ar.magSize,
+    weapon: "pistol",
+    ammo: WEAPONS.pistol.magSize,
     reloading: false,
     reloadEndAt: 0,
     lastShootAt: 0,
+    money: START_MONEY,
+    survivedRound: false,
+    hasSpike: false,
+    planting: false,
+    plantingProgress: 0,
+    defusing: false,
+    ads: false,
     keys: { w: false, a: false, s: false, d: false, shift: false },
     firing: false,
     kills: 0,
@@ -177,28 +239,31 @@ function createPlayer(id, nickname, team, spawnIndex) {
 }
 
 /* =========================================================
-   무기 리로드
+   무기/리로드/구매
 ========================================================= */
 
 function startReload(player, now) {
-  const wpn = WEAPONS[player.weapon];
   player.reloading = true;
-  player.reloadEndAt = now + wpn.reloadTime;
+  player.reloadEndAt = now + WEAPONS[player.weapon].reloadTime;
 }
 
-function completeReload(player) {
-  player.ammo = WEAPONS[player.weapon].magSize;
+function setWeaponFree(player, weaponId) {
+  player.weapon = weaponId;
+  player.ammo = WEAPONS[weaponId].magSize;
   player.reloading = false;
+  player.firing = false;
 }
 
 /* =========================================================
-   히트스캔 샷
-   returns: { hit: bool, target?, headshot?, dmg?, ox,oy,oz, dx,dy,dz, hitX?,hitY?,hitZ? }
+   히트스캔 샷 — 부위(몸통/헤드/다리)별 데미지 + 거리 감쇠
 ========================================================= */
 
 function shootRay(player, now) {
   const wpn = WEAPONS[player.weapon];
-  const spread = wpn.spread * (player.ads ? 0.35 : 1);
+  // 발로란트: 이동 중 사격은 크게 부정확, ADS 시 완화
+  const speed = Math.hypot(player.vx, player.vz);
+  const movePenalty = player.ads ? 1 + Math.min(0.5, speed * 0.10) : 1 + Math.min(2.0, speed * 0.45);
+  const spread = wpn.spread * (player.ads ? 0.35 : 1) * movePenalty;
   const jitter = () => (Math.random() - 0.5) * 2;
 
   const y2 = player.yaw + jitter() * spread;
@@ -214,17 +279,16 @@ function shootRay(player, now) {
   for (const [, t] of (player._match._playerMap || new Map())) {
     if (t.id === player.id || !t.alive || t.team === player.team) continue;
 
-    // torso sphere + head sphere
     const targets = [
-      { cx: t.x, cy: 1.05, cz: t.z, r: 0.55, head: false },
-      { cx: t.x, cy: 1.6,  cz: t.z, r: 0.28, head: true  },
+      { cx: t.x, cy: 0.9,  cz: t.z, r: 0.55, part: "body" },
+      { cx: t.x, cy: 1.6,  cz: t.z, r: 0.28, part: "head" },
+      { cx: t.x, cy: 0.28, cz: t.z, r: 0.32, part: "legs" },
     ];
 
     for (const sphere of targets) {
       const tHit = raySphere(ox, oy, oz, dx, dy, dz, sphere.cx, sphere.cy, sphere.cz, sphere.r);
       if (tHit == null || tHit > SHOT_RANGE) continue;
 
-      // 벽으로 막히는지 검사
       let blocked = false;
       for (const box of MAP.obstacles) {
         const tBox = rayBox(ox, oy, oz, dx, dy, dz, box);
@@ -233,7 +297,7 @@ function shootRay(player, now) {
       if (blocked) continue;
 
       if (!best || tHit < best.t) {
-        best = { t: tHit, target: t, head: sphere.head };
+        best = { t: tHit, target: t, part: sphere.part };
       }
     }
   }
@@ -242,23 +306,27 @@ function shootRay(player, now) {
     const hx = ox + dx * best.t;
     const hy = oy + dy * best.t;
     const hz = oz + dz * best.t;
-    let dmg = Math.round(wpn.dmg * (best.head ? HEADSHOT_MULT : 1));
+    let dmg = Math.round(wpn[best.part]);
     if (wpn.range) dmg = Math.round(dmg * Math.max(0.3, 1 - best.t / wpn.range));
-    return { hit: true, target: best.target, head: best.head, dmg, ox, oy, oz, dx, dy, dz, hitX: hx, hitY: hy, hitZ: hz };
+    if (wpn.falloff) {
+      const f = wpn.falloff;
+      if (best.t > f.from) dmg = Math.round(dmg * Math.max(f.min, 1 - (best.t - f.from) / (f.to - f.from)));
+    }
+    const head = best.part === "head";
+    return { hit: true, target: best.target, head, part: best.part, dmg, ox, oy, oz, dx, dy, dz, hitX: hx, hitY: hy, hitZ: hz };
   }
 
-  // 벽 충돌 점 찾기
   let wallHitT = SHOT_RANGE;
   for (const box of MAP.obstacles) {
     const tHit = rayBox(ox, oy, oz, dx, dy, dz, box);
     if (tHit != null && tHit < wallHitT) wallHitT = tHit;
   }
 
-  return { hit: false, ox, oy, oz, dx, dy, dz, hitX: ox+dx*wallHitT, hitY: oy+dy*wallHitT, hitZ: oz+dz*wallHitT };
+  return { hit: false, ox, oy, oz, dx, dy, dz, hitX: ox + dx * wallHitT, hitY: oy + dy * wallHitT, hitZ: oz + dz * wallHitT };
 }
 
 /* =========================================================
-   매치 생성
+   매치 생성 — 라운드제
 ========================================================= */
 
 function createMatch(roomId) {
@@ -266,64 +334,175 @@ function createMatch(roomId) {
     roomId,
     _playerMap: new Map(),
     teams: { red: [], blue: [] },
-    scores: { red: 0, blue: 0 },
-    timeLeft: MATCH_TIME,
+    scores: { red: 0, blue: 0 },     // 라운드 승수
+    round: 0,
+    phase: "waiting",                 // waiting | buy | combat | roundover | finished
+    phaseEndAt: 0,
+    timeLeft: 0,                      // 전투/스파이크 타이머
     tickCount: 0,
-    state: "waiting",
     finished: false,
     winner: null,
+    attackTeam: "red",
+    defendTeam: "blue",
+    roundWinner: null,
+    roundEndReason: null,
+    lossStreak: { red: 0, blue: 0 },
+    spike: {
+      carrierId: null,
+      dropped: false, dropX: 0, dropZ: 0,
+      planted: false, plantX: 0, plantZ: 0,
+      plantingId: null,
+      defusingId: null,
+      defuseProgress: 0,
+    },
     startedAt: 0,
 
-    /* 시간 소스 — 테스트에서 교체 가능 */
     _now() { return performance.now() / 1000; },
 
+    roleOf(team) { return team === match.attackTeam ? "attack" : "defend"; },
+
     addPlayer(p) {
-      const team = p.team;
-      const idx = match.teams[team].length;
-      const player = createPlayer(p.id, p.nickname, team, idx);
+      const idx = match.teams[p.team].length;
+      const player = createPlayer(p.id, p.nickname, p.team, idx);
       player._match = match;
       match._playerMap.set(p.id, player);
-      match.teams[team].push(p.id);
+      match.teams[p.team].push(p.id);
       return player;
     },
 
     removePlayer(id) {
       const player = match._playerMap.get(id);
       if (!player) return;
+      if (match.spike.carrierId === id) {
+        match.spike.carrierId = null;
+        match.spike.dropped = true;
+        match.spike.dropX = player.x;
+        match.spike.dropZ = player.z;
+      }
+      if (match.spike.defusingId === id) { match.spike.defusingId = null; match.spike.defuseProgress = 0; }
       const arr = match.teams[player.team];
       const idx = arr.indexOf(id);
       if (idx !== -1) arr.splice(idx, 1);
       match._playerMap.delete(id);
     },
 
+    /* 매치 시작 (첫 라운드) */
     start() {
-      match.state = "playing";
       match.startedAt = Date.now();
-      match.timeLeft = MATCH_TIME;
-      match.scores.red = 0;
-      match.scores.blue = 0;
+      match.scores.red = 0; match.scores.blue = 0;
+      match.lossStreak.red = 0; match.lossStreak.blue = 0;
+      match.tickCount = 0;
       match.finished = false;
       match.winner = null;
-      match.tickCount = 0;
-
+      match.round = 0;
       for (const [, p] of match._playerMap) {
-        p.hp = 100; p.alive = true;
         p.kills = 0; p.deaths = 0;
-        p.ammo = WEAPONS[p.weapon].magSize;
-        p.reloading = false;
-        p.respawnAt = 0;
-        const spawns = MAP.spawns[p.team];
-        const s = spawns[p.walkIndex % spawns.length];
-        p.x = s.x; p.z = s.z; p.y = 0;
-        p.walkIndex++;
-        p.keys = { w:false,a:false,s:false,d:false,shift:false };
+        p.survivedRound = false;
+      }
+      const events = [];
+      match._startRound(events);
+      return events;
+    },
+
+    _startRound(events) {
+      const now = match._now();
+      match.round++;
+      match.phase = "buy";
+      match.phaseEndAt = now + BUY_TIME;
+      match.timeLeft = BUY_TIME;
+      match.roundWinner = null;
+      match.roundEndReason = null;
+      match.spike.carrierId = null;
+      match.spike.dropped = false;
+      match.spike.planted = false;
+      match.spike.plantingId = null;
+      match.spike.defusingId = null;
+      match.spike.defuseProgress = 0;
+
+      const attackers = [];
+      for (const [, p] of match._playerMap) {
+        // 이전 라운드 생존 → 무기 유지(풀탄창), 전사 → 권총
+        if (!p.survivedRound || !WEAPONS[p.weapon] || p.weapon === "pistol") {
+          setWeaponFree(p, "pistol");
+        } else {
+          p.ammo = WEAPONS[p.weapon].magSize;
+        }
+        p.survivedRound = false;
+        p.hasSpike = false;
+        p.hp = MAX_HP;
+        p.alive = true;
+        p.vx = 0; p.vz = 0;
         p.firing = false;
+        p.ads = false;
+        p.planting = false;
+        p.plantingProgress = 0;
+        p.defusing = false;
+        p.keys = { w: false, a: false, s: false, d: false, shift: false };
+        const role = match.roleOf(p.team);
+        const s = MAP.spawns[role][p.walkIndex % MAP.spawns[role].length];
+        p.x = s.x; p.y = 0; p.z = s.z;
+        p.yaw = role === "attack" ? Math.PI : 0;
+        p.walkIndex++;
+        if (role === "attack") attackers.push(p);
+      }
+
+      // 스파이크 캐리어 랜덤 배정 (공격팀)
+      if (attackers.length > 0) {
+        const carrier = attackers[rnd(attackers.length)];
+        match.spike.carrierId = carrier.id;
+        carrier.hasSpike = true;
+        events.push({ type: "spikecarrier", carrierId: carrier.id });
+      }
+
+      events.push({
+        type: "roundstart",
+        round: match.round,
+        phase: "buy",
+        attackTeam: match.attackTeam,
+        defendTeam: match.defendTeam,
+        buyTime: BUY_TIME,
+        scores: { ...match.scores },
+      });
+    },
+
+    _endRound(winner, reason, events) {
+      if (match.phase !== "combat") return; // 중복 라운드 종료 방지
+      match.roundWinner = winner;
+      match.roundEndReason = reason;
+      match.scores[winner]++;
+
+      // 경제: 승/패 보상 + 연패 보너스
+      const loser = winner === match.attackTeam ? match.defendTeam : match.attackTeam;
+      match.lossStreak[winner] = 0;
+      match.lossStreak[loser]++;
+      for (const [, p] of match._playerMap) {
+        const gain = p.team === winner ? MONEY_ROUND_WIN : lossBonus(match.lossStreak[p.team]);
+        p.money = clamp(p.money + gain, 0, MAX_MONEY);
+        // 발로란트: 승패와 무관하게 "생존"하면 다음 라운드 무기 유지
+        p.survivedRound = p.alive && p.hp > 0;
+      }
+
+      match.spike.plantingId = null;
+      match.spike.defusingId = null;
+      match.spike.defuseProgress = 0;
+      match.phase = "roundover";
+      match.phaseEndAt = match._now() + ROUND_OVER_TIME;
+
+      events.push({ type: "roundend", winner, reason, scores: { ...match.scores }, round: match.round });
+
+      if (match.scores[winner] >= ROUNDS_TO_WIN) {
+        match.finished = true;
+        match.phase = "finished";
+        match.winner = winner;
+        events.push({ type: "end", winner, scores: { ...match.scores } });
       }
     },
 
+    /* ---- 입력 ---- */
+
     input(id, data) {
       const p = match._playerMap.get(id);
-      if (!p) return;
+      if (!p || !p.alive) return;
       if (data.keys) {
         p.keys.w     = !!data.keys.w;
         p.keys.a     = !!data.keys.a;
@@ -333,25 +512,285 @@ function createMatch(roomId) {
       }
       if (typeof data.yaw === "number")   p.yaw = data.yaw;
       if (typeof data.pitch === "number") p.pitch = data.pitch;
-      if (typeof data.firing === "boolean") p.firing = data.firing;
+      if (typeof data.firing === "boolean") p.firing = data.firing && match.phase === "combat";
       if (typeof data.ads === "boolean")   p.ads = data.ads;
     },
 
-    setWeapon(id, weaponId) {
+    /* ---- 구매: 가격 지불, 전투 직전 무기 변경 ---- */
+    buy(id, weaponId) {
       const p = match._playerMap.get(id);
-      if (!p || !WEAPONS[weaponId]) return;
-      if (p.weapon === weaponId) return;
-      p.weapon = weaponId;
-      p.ammo = WEAPONS[weaponId].magSize;
-      p.reloading = false;
-      p.firing = false;
+      if (!p || !p.alive || match.phase !== "buy") return false;
+      const w = WEAPONS[weaponId];
+      if (!w) return false;
+      const cost = weaponId === p.weapon ? 0 : w.price;
+      if (p.money < cost) return false;
+      p.money -= cost;
+      setWeaponFree(p, weaponId);
+      return true;
+    },
+
+    /* ---- 스파이크 상호작용 ---- */
+    interact(id, data) {
+      const p = match._playerMap.get(id);
+      if (!p || !p.alive) return;
+      const s = match.spike;
+      const start = !!(data && data.action === "start");
+
+      if (!start) {
+        p.planting = false;
+        p.plantingProgress = 0;
+        p.defusing = false;
+        if (s.defusingId === p.id) {
+          s.defusingId = null;
+          // 발로란트: 해체 절반(3.5초)을 넘겼으면 진행 보존, 미만이면 초기화
+          if (s.defuseProgress < 0.5) s.defuseProgress = 0;
+        }
+        return;
+      }
+
+      if (data.type === "drop") {
+        // 구매 단계에서 캐리어가 스파이크를 버려 팀원에게 전달
+        if (p.team === match.attackTeam && p.hasSpike && !s.planted && !s.dropped) {
+          s.carrierId = null;
+          p.hasSpike = false;
+          s.dropped = true;
+          s.dropX = p.x;
+          s.dropZ = p.z;
+        }
+        return;
+      }
+
+      if (match.phase !== "combat") return;
+
+      if (data.type === "plant") {
+        if (p.team !== match.attackTeam || !p.hasSpike) return;
+        if (s.planted) return;
+        if (!inPlantZone(p)) return;
+        p.planting = true;
+        s.plantingId = p.id;
+      } else if (data.type === "defuse") {
+        if (p.team !== match.defendTeam) return;
+        if (!s.planted) return;
+        if (dist2(p.x, p.z, s.plantX, s.plantZ) > 4) return;
+        if (s.defusingId && s.defusingId !== p.id) return;
+        p.defusing = true;
+        s.defusingId = p.id;
+      }
+    },
+
+    /* ---- 발사 ---- */
+
+    _applyShot(actor, result, events) {
+      const victim = result.target;
+      victim.hp -= result.dmg;
+      events.push({ type: "hurt", pid: victim.id, byId: actor.id, dmg: result.dmg, headshot: result.head, hp: Math.max(0, victim.hp), hpMax: MAX_HP });
+
+      if (victim.hp <= 0) {
+        victim.alive = false;
+        victim.hp = 0;
+        victim.deaths++;
+        actor.kills++;
+        actor.money = clamp(actor.money + MONEY_KILL, 0, MAX_MONEY);
+        events.push({ type: "kill", killerId: actor.id, killerName: actor.nickname, killerTeam: actor.team, victimId: victim.id, victimName: victim.nickname, victimTeam: victim.team, headshot: result.head });
+
+        // 캐리어 사망 → 스파이크 드랍
+        if (match.spike.carrierId === victim.id) {
+          match.spike.carrierId = null;
+          victim.hasSpike = false;
+          match.spike.dropped = true;
+          match.spike.dropX = victim.x;
+          match.spike.dropZ = victim.z;
+          events.push({ type: "spikedrop", x: victim.x, z: victim.z });
+        }
+        if (match.spike.plantingId === victim.id) match.spike.plantingId = null;
+        if (match.spike.defusingId === victim.id) match.spike.defusingId = null;
+      }
+    },
+
+    /* ---- 스파이크 틱 ---- */
+    _spikeTick(now, dt, events) {
+      const s = match.spike;
+
+      if (s.planted) {
+        const def = s.defusingId ? match._playerMap.get(s.defusingId) : null;
+        const valid = def && def.alive && def.team === match.defendTeam &&
+          dist2(def.x, def.z, s.plantX, s.plantZ) <= 4;
+        if (valid) {
+          s.defuseProgress += dt / SPIKE_DEFUSE_TIME;
+          if (s.defuseProgress >= 1) {
+            s.planted = false;
+            s.defusingId = null;
+            s.defuseProgress = 0;
+            events.push({ type: "spikedefuse", byId: def.id });
+            match._endRound(match.defendTeam, "defuse", events);
+            return;
+          }
+        } else {
+          s.defusingId = null;
+          // 해체 체크포인트: 절반(3.5초) 미만이면 초기화, 초과면 진행 보존
+          if (s.defuseProgress < 0.5) s.defuseProgress = 0;
+        }
+        return;
+      }
+
+      // 설치 진행 (공격팀 캐리어만)
+      const planter = s.plantingId ? match._playerMap.get(s.plantingId) : null;
+      const plantValid = planter && planter.alive && planter.team === match.attackTeam &&
+        planter.hasSpike && inPlantZone(planter);
+      if (plantValid) {
+        planter.plantingProgress += dt / SPIKE_PLANT_TIME;
+        if (planter.plantingProgress >= 1) {
+          s.planted = true;
+          s.plantX = planter.x;
+          s.plantZ = planter.z;
+          s.plantingId = null;
+          s.defuseProgress = 0;
+          s.carrierId = null;
+          planter.hasSpike = false;
+          planter.plantingProgress = 0;
+          planter.planting = false;
+          match.timeLeft = SPIKE_TIME;
+          planter.money = clamp(planter.money + MONEY_PLANT, 0, MAX_MONEY);
+          events.push({ type: "spikeplant", pid: planter.id, x: planter.x, z: planter.z, timeLeft: SPIKE_TIME });
+        }
+      } else if (s.plantingId) {
+        const pp = match._playerMap.get(s.plantingId);
+        if (pp) { pp.plantingProgress = 0; pp.planting = false; }
+        s.plantingId = null;
+      }
+
+      // 픽업 (공격팀만, 드랍 지점 도달 시 즉시)
+      if (s.dropped) {
+        for (const [, p] of match._playerMap) {
+          if (p.team !== match.attackTeam || !p.alive || p.hasSpike) continue;
+          if (dist2(p.x, p.z, s.dropX, s.dropZ) < 1.2) {
+            s.dropped = false;
+            s.carrierId = p.id;
+            p.hasSpike = true;
+            events.push({ type: "spikepickup", pid: p.id });
+            break;
+          }
+        }
+      }
+    },
+
+    tick(dt) {
+      if (match.finished) return [];
+      const now = match._now();
+      const events = [];
+      match.tickCount++;
+
+      // 구매 → 전투 전환
+      if (match.phase === "buy" && now >= match.phaseEndAt) {
+        match.phase = "combat";
+        match.phaseEndAt = 0;
+        match.timeLeft = ROUND_TIME;
+        events.push({ type: "phase", phase: "combat", timeLeft: ROUND_TIME });
+      }
+
+      const canAct = match.phase === "buy" || match.phase === "combat";
+
+      // 플레이어 물리/사격
+      if (canAct) {
+        for (const [, p] of match._playerMap) {
+          if (!p.alive) continue;
+
+          if (p.reloading && now >= p.reloadEndAt) {
+            p.ammo = WEAPONS[p.weapon].magSize;
+            p.reloading = false;
+          }
+
+          // 이동 (설치/해체 홀드 중에는 발로란트처럼 고정)
+          if (!p.planting && !p.defusing) {
+            const walk = p.keys.shift ? SPRINT_MULT : 1;
+            const y = p.yaw;
+            let ix = 0, iz = 0;
+            if (p.keys.w) { ix += Math.sin(y); iz += Math.cos(y); }
+            if (p.keys.s) { ix -= Math.sin(y); iz -= Math.cos(y); }
+            if (p.keys.a) { ix += Math.cos(y); iz -= Math.sin(y); }
+            if (p.keys.d) { ix -= Math.cos(y); iz += Math.sin(y); }
+            const il = Math.sqrt(ix * ix + iz * iz) || 1;
+            ix /= il; iz /= il;
+            const tx = ix * MOVE_SPEED * walk;
+            const tz = iz * MOVE_SPEED * walk;
+            p.vx += (tx - p.vx) * Math.min(1, ACCEL * dt);
+            p.vz += (tz - p.vz) * Math.min(1, ACCEL * dt);
+            p.x += p.vx * dt;
+            p.z += p.vz * dt;
+
+            for (const box of MAP.obstacles) {
+              const [nx, nz] = circleAABB(p.x, p.z, PLAYER_RADIUS, box);
+              p.x = nx; p.z = nz;
+            }
+            const hs = MAP.halfSize - PLAYER_RADIUS;
+            p.x = clamp(p.x, -hs, hs);
+            p.z = clamp(p.z, -hs, hs);
+          }
+
+          // 사격 (전투 단계만)
+          if (match.phase === "combat" && p.firing && !p.reloading && p.ammo > 0) {
+            const wpn = WEAPONS[p.weapon];
+            if (now - p.lastShootAt >= wpn.cadence) {
+              p.lastShootAt = now;
+              p.ammo--;
+              const shots = wpn.pellets || 1;
+              for (let k = 0; k < shots; k++) {
+                const result = shootRay(p, now);
+                events.push({ type: "shot", pid: p.id, weapon: p.weapon, snd: k === 0, ...result });
+                if (!result.hit || !result.target) continue;
+                match._applyShot(p, result, events);
+                const victim = result.target;
+                if (!victim.alive) break; // 죽인 탄환에서 중단
+              }
+              if (p.ammo <= 0 && !p.reloading) {
+                startReload(p, now);
+              }
+            }
+          }
+        }
+      }
+
+      // 스파이크 진행 (전투 단계)
+      if (match.phase === "combat") {
+        match._spikeTick(now, dt, events);
+
+        // 라운드 종료 판정
+        if (!match.finished) {
+          let aliveAttack = 0, aliveDefend = 0;
+          for (const [, p] of match._playerMap) {
+            if (!p.alive) continue;
+            if (p.team === match.attackTeam) aliveAttack++; else aliveDefend++;
+          }
+
+          match.timeLeft -= dt;
+          let win = null, reason = null;
+
+          if (match.spike.planted) {
+            if (match.timeLeft <= 0) { win = match.attackTeam; reason = "detonate"; }
+          } else if (match.timeLeft <= 0) {
+            win = match.defendTeam; reason = "timeout";
+          }
+
+          if (!win && aliveDefend <= 0) { win = match.attackTeam; reason = "elim"; }
+          if (!win && aliveAttack <= 0 && !match.spike.planted) { win = match.defendTeam; reason = "elim"; }
+
+          if (win) {
+            if (reason === "detonate") events.push({ type: "spikedetonate", x: match.spike.plantX, z: match.spike.plantZ });
+            match._endRound(win, reason, events);
+          }
+        }
+      } else if (match.phase === "roundover" && now >= match.phaseEndAt) {
+        match._startRound(events);
+      }
+
+      return events;
     },
 
     getPlayers() { return [...match._playerMap.values()]; },
 
     getPlayer(id) { return match._playerMap.get(id) || null; },
 
-    /* 봇 AI용 — 조준점(몸통) 사이에 벽이 있는지 검사 */
+    /* 봇 AI용 — 조준점 사이 벽 검사 */
     hasLos(aId, bId) {
       const a = match._playerMap.get(aId);
       const b = match._playerMap.get(bId);
@@ -375,123 +814,6 @@ function createMatch(roomId) {
       startReload(p, match._now());
     },
 
-    tick(dt) {
-      if (match.state !== "playing" || match.finished) return [];
-      const now = match._now();
-      const events = [];
-
-      match.tickCount++;
-      match.timeLeft -= dt;
-
-      if (match.timeLeft <= 0) {
-        match.timeLeft = 0;
-        match.winner = match.scores.red >= match.scores.blue ? "red" : "blue";
-        if (match.scores.red === match.scores.blue) match.winner = "draw";
-        match.finished = true;
-        match.state = "finished";
-        events.push({ type: "end", winner: match.winner, scores: { ...match.scores } });
-        return events;
-      }
-
-      for (const [, p] of match._playerMap) {
-        // 리스폰 체크
-        if (!p.alive && now >= p.respawnAt) {
-          p.alive = true;
-          p.hp = 100;
-          p.ammo = WEAPONS[p.weapon].magSize;
-          p.reloading = false;
-          p.firing = false;
-          const spawns = MAP.spawns[p.team];
-          const s = spawns[p.walkIndex % spawns.length];
-          p.x = s.x; p.z = s.z; p.y = 0;
-          p.walkIndex++;
-          p.vx = 0; p.vz = 0;
-          events.push({ type: "spawn", pid: p.id, x: p.x, y: p.y, z: p.z });
-        }
-
-        if (!p.alive) continue;
-
-        // 리로드 완료
-        if (p.reloading && now >= p.reloadEndAt) {
-          completeReload(p);
-        }
-
-        // 이동
-        const walk = p.keys.shift ? SPRINT_MULT : 1;
-        const y = p.yaw;
-        let ix = 0, iz = 0;
-        if (p.keys.w) { ix += Math.sin(y); iz += Math.cos(y); }
-        if (p.keys.s) { ix -= Math.sin(y); iz -= Math.cos(y); }
-        if (p.keys.a) { ix += Math.cos(y); iz -= Math.sin(y); }
-        if (p.keys.d) { ix -= Math.cos(y); iz += Math.sin(y); }
-        const il = Math.sqrt(ix*ix + iz*iz) || 1;
-        ix /= il; iz /= il;
-        const tx = ix * MOVE_SPEED * walk;
-        const tz = iz * MOVE_SPEED * walk;
-        p.vx += (tx - p.vx) * Math.min(1, ACCEL * dt);
-        p.vz += (tz - p.vz) * Math.min(1, ACCEL * dt);
-        p.x += p.vx * dt;
-        p.z += p.vz * dt;
-
-        // 장애물 충돌
-        for (const box of MAP.obstacles) {
-          const [nx, nz] = circleAABB(p.x, p.z, PLAYER_RADIUS, box);
-          p.x = nx; p.z = nz;
-        }
-
-        // 경계 벽
-        const hs = MAP.halfSize - PLAYER_RADIUS;
-        p.x = clamp(p.x, -hs, hs);
-        p.z = clamp(p.z, -hs, hs);
-
-        // 사격 (샷건 등 다탄환 지원)
-        if (p.firing && p.alive && !p.reloading && p.ammo > 0) {
-          const wpn = WEAPONS[p.weapon];
-          if (now - p.lastShootAt >= wpn.cadence) {
-            p.lastShootAt = now;
-            p.ammo--;
-            const shots = wpn.pellets || 1;
-            for (let k = 0; k < shots; k++) {
-              const result = shootRay(p, now);
-              events.push({ type: "shot", pid: p.id, weapon: p.weapon, snd: k === 0, ...result });
-              if (!result.hit || !result.target) continue;
-
-              const victim = result.target;
-              victim.hp -= result.dmg;
-              events.push({ type: "hurt", pid: victim.id, byId: p.id, dmg: result.dmg, headshot: result.head, hp: Math.max(0, victim.hp), hpMax: 100 });
-
-              if (victim.hp <= 0) {
-                victim.alive = false;
-                victim.respawnAt = now + RESPAWN_DELAY;
-                victim.hp = 0;
-                victim.deaths++;
-                p.kills++;
-                match.scores[p.team]++;
-                events.push({ type: "kill", killerId: p.id, killerName: p.nickname, killerTeam: p.team, victimId: victim.id, victimName: victim.nickname, victimTeam: victim.team, headshot: result.head });
-
-                // 경기 종료 체크
-                if (match.scores[p.team] >= KILL_LIMIT) {
-                  match.winner = p.team;
-                  match.finished = true;
-                  match.state = "finished";
-                  events.push({ type: "end", winner: p.team, scores: { ...match.scores } });
-                  return events;
-                }
-                break; // 이 탄환에서 사망 — 다음 탄환 불필요
-              }
-            }
-
-            // 자동 리로드
-            if (p.ammo <= 0 && !p.reloading) {
-              startReload(p, now);
-            }
-          }
-        }
-      }
-
-      return events;
-    },
-
     snapshot() {
       const players = [];
       for (const [, p] of match._playerMap) {
@@ -503,13 +825,34 @@ function createMatch(roomId) {
           kills: p.kills, deaths: p.deaths,
           weapon: p.weapon, ammo: p.ammo,
           reloading: p.reloading,
+          money: p.money,
+          hasSpike: p.hasSpike,
+          planting: p.planting,
+          defusing: p.defusing,
           sprinting: p.keys.shift && (p.keys.w || p.keys.a || p.keys.s || p.keys.d),
         });
       }
       return {
         t: match.tickCount,
+        phase: match.phase,
+        round: match.round,
         timeLeft: Math.max(0, match.timeLeft),
         scores: { ...match.scores },
+        roundWinner: match.roundWinner,
+        roundEndReason: match.roundEndReason,
+        attackTeam: match.attackTeam,
+        defendTeam: match.defendTeam,
+        spike: {
+          carrierId: match.spike.carrierId,
+          dropped: match.spike.dropped,
+          dropX: match.spike.dropX,
+          dropZ: match.spike.dropZ,
+          planted: match.spike.planted,
+          plantX: match.spike.plantX,
+          plantZ: match.spike.plantZ,
+          defusingId: match.spike.defusingId,
+          defuseProgress: match.spike.defuseProgress,
+        },
         players,
         finished: match.finished,
         winner: match.winner,
