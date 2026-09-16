@@ -138,7 +138,7 @@ function stepBot(room, botId) {
 
   /* 구매 단계: 자동 구매 후 대기 */
   if (m.phase === "buy") {
-    m.input(botId, { keys: { w: false, a: false, s: false, d: false, shift: false }, firing: false, ads: false });
+    m.input(botId, { keys: { w: false, a: false, s: false, d: false, shift: false, space: false }, firing: false, ads: false });
     if (!bot.bought) {
       bot.bought = true;
       // AI 경제 보정: 최소한 SMG 살 돈은 있게 (발로란트 감성 유지 + 난이도)
@@ -150,7 +150,7 @@ function stepBot(room, botId) {
   }
 
   if (!me.alive || m.phase !== "combat") {
-    m.input(botId, { keys: { w: false, a: false, s: false, d: false, shift: false }, firing: false, ads: false });
+    m.input(botId, { keys: { w: false, a: false, s: false, d: false, shift: false, space: false }, firing: false, ads: false });
     if (bot.interacting) { m.interact(botId, { action: "stop" }); bot.interacting = false; }
     return;
   }
@@ -216,7 +216,7 @@ function stepBot(room, botId) {
     }
   }
 
-  const keys = { w: false, a: false, s: false, d: false, shift: false };
+  const keys = { w: false, a: false, s: false, d: false, shift: false, space: false };
   let yaw = me.yaw;
   let pitch = me.pitch;
   let firing = false;
@@ -372,6 +372,15 @@ setInterval(() => {
         case "spikedetonate":
           io.to(room.id).emit("bomb:detonate", { x: ev.x, z: ev.z });
           break;
+        case "skill:smoke":
+          io.to(room.id).emit("skill:smoke", ev);
+          break;
+        case "skill:ult":
+          io.to(room.id).emit("skill:ult", ev);
+          break;
+        case "skill:ultboom":
+          io.to(room.id).emit("skill:ultboom", ev);
+          break;
         case "end": {
           room.match.finished = true;
           room.status = "lobby";
@@ -517,6 +526,15 @@ io.on("connection", (socket) => {
     const room = ROOMS.get(socket.data.roomId);
     if (!room || room.status !== "playing" || !room.match) return;
     room.match.interact(socket.id, data || {});
+  });
+
+  socket.on("game:skill", (data) => {
+    const room = ROOMS.get(socket.data.roomId);
+    if (!room || room.status !== "playing" || !room.match) return;
+    const evts = room.match.skill(socket.id, data || {});
+    for (const ev of (evts || [])) {
+      io.to(room.id).emit(ev.type, ev);
+    }
   });
 
   socket.on("game:reload", () => {

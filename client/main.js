@@ -14,13 +14,18 @@ const PLAYER_RADIUS = 0.45;
 const MOVE_SPEED = 5.5;
 const SPRINT_MULT = 1.55;
 const ACCEL = 12;
-const INPUT_INTERVAL = 34; // ms
 const RECONCILE_DIST = 3.5;
 const SENS = 0.0022;
 const TOUCH_SENS = 0.006;
 const JOY_R = 44;
 const PLANT_TIME = 1.5;
 const DEFUSE_TIME = 7;
+const JUMP_VEL = 6.8;
+const GRAVITY = 18;
+const SERVER_TICK_RATE = 30;          // 리모트 속도 추정용 (스냅샷 t 는 서버 30Hz 틱)
+const INPUT_SAMPLE_MS = 34;
+const ULT_RADIUS = 5.5;
+const SMOKE_DURATION = 10;
 
 const TEAM_COLOR = { red: 0xe84c4c, blue: 0x4c8bee };
 const TEAM_NAME = { red: "RED", blue: "BLUE" };
@@ -50,9 +55,11 @@ const state = {
   deaths: 0,
   planting: false,
   defusing: false,
-  x: 12, z: -40,
+  x: 12, y: 0, z: -40,
   yaw: Math.PI, pitch: 0,
-  vx: 0, vz: 0,
+  vx: 0, vz: 0, vy: 0,
+  prevSpace: false,
+  ultCharge: 0,
   map: null,
   weapons: {},
   scores: { red: 0, blue: 0 },
@@ -60,7 +67,7 @@ const state = {
   phase: "waiting",
   round: 0,
   spike: { carrierId: null, dropped: false, dropX: 0, dropZ: 0, planted: false, plantX: 0, plantZ: 0, defusingId: null, defuseProgress: 0 },
-  keys: { w: false, a: false, s: false, d: false, shift: false },
+  keys: { w: false, a: false, s: false, d: false, shift: false, space: false },
   firing: false,
   ads: false,
   uiLock: false,
@@ -70,6 +77,8 @@ const state = {
   tracers: [],
   impacts: [],
   enemies: [],
+  smokes: [],
+  screenShake: 0,
   lastInput: 0,
   cam: { fov: 75 },
   viewmodel: null,
@@ -253,7 +262,7 @@ function buildWorld(map) {
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(hs * 2, hs * 2),
-    new THREE.MeshLambertMaterial({ color: 0x8fa1bd })
+    new THREE.MeshLambertMaterial({ color: 0x8899ad })
   );
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
@@ -275,7 +284,12 @@ function buildWorld(map) {
 
   for (const ob of map.obstacles) {
     const geo = new THREE.BoxGeometry(ob.w, map.wallHeight, ob.d);
-    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x39404f }));
+    // 각 장애물마다 약간의 색상 변화 ( Realistic feel )
+    const h = 0.58 + (((ob.x * 13 + ob.z * 7) | 0) % 100) * 0.001;
+    const s = 0.12 + (((ob.z * 11 + ob.x * 3) | 0) % 100) * 0.002;
+    const l = 0.22 + (((ob.x + ob.z * 5) | 0) % 100) * 0.0016;
+    const boxMat = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(h, s, l) });
+    const mesh = new THREE.Mesh(geo, boxMat);
     mesh.position.set(ob.x, map.wallHeight / 2, ob.z);
     scene.add(mesh);
     state.mapObjects.push(mesh);
@@ -334,6 +348,8 @@ function clearWorldObjects() {
   for (const o of state.mapObjects) scene.remove(o);
   state.mapObjects = [];
   clearTracers();
+  state.smokes = [];
+  clearSmokeMeshes();
   for (const [, p] of state.players) scene.remove(p.group);
   state.players.clear();
 }
@@ -362,15 +378,18 @@ function makePlayerMesh(p) {
   const color = TEAM_COLOR[p.team];
   const mat = new THREE.MeshLambertMaterial({ color });
   const dark = new THREE.MeshLambertMaterial({ color: 0x22262f });
+  // 플레이어별 알록달록 색상 (chest/헬멧/권총/배낭 강조)
+  const pCol = new THREE.Color().setHSL(((p.playerColor || 0) % 360) / 360, 0.75, 0.55);
+  const pColDark = pCol.clone().multiplyScalar(0.55);
 
   const legL = meshBox(0.24, 0.5, 0.26, dark); legL.position.set(-0.18, 0.28, 0);
   const legR = meshBox(0.24, 0.5, 0.26, dark); legR.position.set(0.18, 0.28, 0);
   const body = meshBox(0.72, 1.25, 0.44, mat); body.position.y = 0.63;
-  const chest = meshBox(0.78, 0.42, 0.52, new THREE.MeshLambertMaterial({ color: 0x2c3446 })); chest.position.y = 1.05;
-  const pack = meshBox(0.5, 0.55, 0.22, dark); pack.position.set(0, 0.95, -0.32);
+  const chest = meshBox(0.78, 0.42, 0.52, new THREE.MeshLambertMaterial({ color: pCol })); chest.position.y = 1.05;
+  const pack = meshBox(0.5, 0.55, 0.22, new THREE.MeshLambertMaterial({ color: pColDark })); pack.position.set(0, 0.95, -0.32);
   const head = meshBox(0.5, 0.4, 0.42, new THREE.MeshLambertMaterial({ color: 0xd8b28a })); head.position.y = 1.62;
-  const helmet = meshBox(0.54, 0.2, 0.46, dark); helmet.position.set(0, 1.78, 0);
-  const gun = meshBox(0.12, 0.12, 0.7, dark); gun.position.set(0.34, 1.12, 0.5);
+  const helmet = meshBox(0.54, 0.2, 0.46, new THREE.MeshLambertMaterial({ color: pCol })); helmet.position.set(0, 1.78, 0);
+  const gun = meshBox(0.12, 0.12, 0.7, new THREE.MeshLambertMaterial({ color: pColDark })); gun.position.set(0.34, 1.12, 0.5);
 
   group.add(legL, legR, body, chest, pack, head, helmet, gun);
 
@@ -440,6 +459,72 @@ function showExplosionAt(x, z) {
   setTimeout(() => { if (explosionMesh) { scene.remove(explosionMesh); explosionMesh = null; } }, 350);
 }
 
+/* ------------- 연막 (스모크) ------------- */
+
+const smokeMeshes = new Map();   // id -> { mesh, inner }
+
+function clearSmokeMeshes() {
+  for (const [, sm] of smokeMeshes) {
+    scene.remove(sm.mesh);
+    if (sm.inner) scene.remove(sm.inner);
+  }
+  smokeMeshes.clear();
+}
+
+function syncSmokeMeshes() {
+  // state.smokes 기반 렌더 메시 동기화 (스냅샷/이벤트 공통)
+  const alive = new Set(state.smokes.map(s => s.id));
+  for (const [id, sm] of smokeMeshes) {
+    if (!alive.has(id)) { scene.remove(sm.mesh); if (sm.inner) scene.remove(sm.inner); smokeMeshes.delete(id); }
+  }
+  for (const sm of state.smokes) {
+    if (smokeMeshes.has(sm.id)) continue;
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(sm.r, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0x6a7d99, transparent: true, opacity: 0.4, depthWrite: false })
+    );
+    mesh.position.set(sm.x, 2.2, sm.z);
+    const inner = new THREE.Mesh(
+      new THREE.SphereGeometry(sm.r * 0.55, 16, 10),
+      new THREE.MeshBasicMaterial({ color: 0x3c4757, transparent: true, opacity: 0.5, depthWrite: false })
+    );
+    inner.position.set(sm.x, 1.6, sm.z);
+    scene.add(mesh);
+    scene.add(inner);
+    smokeMeshes.set(sm.id, { mesh, inner, born: sm.born });
+  }
+}
+
+/* ------------- 궁극기 (낙뢰) ------------- */
+
+let ultTelegraph = null;
+let ultBoomMesh = null;
+function showUltTelegraph(x, z) {
+  if (ultTelegraph) scene.remove(ultTelegraph);
+  ultTelegraph = new THREE.Mesh(
+    new THREE.RingGeometry(ULT_RADIUS - 0.15, ULT_RADIUS, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffd75f, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
+  );
+  ultTelegraph.rotation.x = -Math.PI / 2;
+  ultTelegraph.position.set(x, 0.05, z);
+  scene.add(ultTelegraph);
+  setTimeout(() => {
+    if (ultTelegraph) { scene.remove(ultTelegraph); ultTelegraph = null; }
+    showUltBoom(x, z);
+  }, 1200);
+}
+function showUltBoom(x, z) {
+  if (ultBoomMesh) scene.remove(ultBoomMesh);
+  ultBoomMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffd75f, transparent: true, opacity: 0.95 })
+  );
+  ultBoomMesh.position.set(x, 2.5, z);
+  scene.add(ultBoomMesh);
+  setTimeout(() => { if (ultBoomMesh) { scene.remove(ultBoomMesh); ultBoomMesh = null; } }, 500);
+  state.screenShake = Math.max(state.screenShake, 0.35);
+}
+
 /* ------------- 이동 예측 (서버와 동일) ------------- */
 
 function circleAABB(px, pz, r, box) {
@@ -478,13 +563,15 @@ function predictStep(dt) {
   }
   const tx = ix * MOVE_SPEED * speed;
   const tz = iz * MOVE_SPEED * speed;
-  if (frozen) { state.vx = 0; state.vz = 0; return; }
-  state.vx += (tx - state.vx) * Math.min(1, ACCEL * dt);
-  state.vz += (tz - state.vz) * Math.min(1, ACCEL * dt);
-  state.x += state.vx * dt;
-  state.z += state.vz * dt;
+  if (frozen) { state.vx = 0; state.vz = 0; }
+  else {
+    state.vx += (tx - state.vx) * Math.min(1, ACCEL * dt);
+    state.vz += (tz - state.vz) * Math.min(1, ACCEL * dt);
+    state.x += state.vx * dt;
+    state.z += state.vz * dt;
+  }
 
-  if (state.map) {
+  if (state.map && !frozen) {
     for (const box of state.map.obstacles) {
       [state.x, state.z] = circleAABB(state.x, state.z, PLAYER_RADIUS, box);
     }
@@ -492,6 +579,15 @@ function predictStep(dt) {
   const hs = state.map ? state.map.halfSize - PLAYER_RADIUS : 999;
   state.x = clamp(state.x, -hs, hs);
   state.z = clamp(state.z, -hs, hs);
+
+  // 점프 로컬 예측 (서버와 동일 물리 — 상승 에지)
+  if (state.y <= 0 && state.keys.space && !state.prevSpace && !frozen) state.vy = JUMP_VEL;
+  state.prevSpace = state.keys.space;
+  if (state.y > 0 || state.vy > 0) {
+    state.vy -= GRAVITY * dt;
+    state.y += state.vy * dt;
+    if (state.y <= 0) { state.y = 0; state.vy = 0; }
+  }
 }
 
 function clamp(v, mn, mx) { return v < mn ? mn : v > mx ? mx : v; }
@@ -532,6 +628,21 @@ window.addEventListener("keydown", (e) => {
       Sfx.reload();
       break;
     case "KeyE": startInteract(true); break;
+    case "Space":
+      if (state.alive && !state.planting && !state.defusing) state.keys.space = true;
+      break;
+    case "KeyQ":
+      if (state.phase === "combat" && state.alive && !buyUIOpen()) {
+        socket.emit("game:skill", { type: "smoke" });
+        Sfx.switchW();
+      }
+      break;
+    case "KeyX":
+      if (state.phase === "combat" && state.alive && state.ultCharge >= 100 && !buyUIOpen()) {
+        socket.emit("game:skill", { type: "ult" });
+        Sfx.shot("sr");
+      }
+      break;
     case "Escape":
       if (buyUIOpen()) closeBuyUI(true);
       break;
@@ -546,6 +657,7 @@ window.addEventListener("keyup", (e) => {
     case "KeyD": state.keys.d = false; break;
     case "ShiftLeft":
     case "ShiftRight": state.keys.shift = false; break;
+    case "Space": state.keys.space = false; break;
     case "KeyE": startInteract(false); break;
   }
 });
@@ -958,6 +1070,24 @@ const ui = {
     if (state.inGame && !state.alive && state.phase !== "finished") deadEl.classList.remove("hidden");
     else deadEl.classList.add("hidden");
 
+    // 스킬 HUD
+    const ultEl = $("#skill-ult");
+    const ultPct = Math.min(100, Math.round(state.ultCharge || 0));
+    const uc = $("#skill-ult-charge");
+    if (uc) uc.textContent = ultPct >= 100 ? "궁극기!" : ultPct + "%";
+    if (ultEl) ultEl.classList.toggle("ready", ultPct >= 100);
+    const smokeEl = $("#skill-smoke");
+    if (smokeEl) {
+      const ready = state.alive && state.phase === "combat";
+      smokeEl.classList.toggle("ready", ready);
+      smokeEl.style.opacity = ready ? 1 : 0.5;
+    }
+    // 스코프 오버레이 상태 동기화
+    const scopeOvr = $("#scope-overlay");
+    if (!(state.myWeapon === "sr" && state.ads && state.alive && state.phase === "combat")) {
+      scopeOvr.classList.add("hidden");
+    }
+
     updateInteractHint();
   },
 };
@@ -1077,7 +1207,7 @@ socket.on("game:started", (d) => {
   state.cam.fov = 75;
   camera.fov = 75;
   camera.updateProjectionMatrix();
-  state.yaw = state.myTeam === "red" ? Math.PI : 0;
+  state.yaw = state.myTeam === "red" ? 0 : Math.PI;
   state.pitch = 0;
   state.spike = {
     carrierId: d.state.spike?.carrierId || null,
@@ -1126,6 +1256,7 @@ socket.on("game:state", (snap) => {
   state.phase = snap.phase || state.phase;
   state.round = snap.round || state.round;
   state.timeLeft = snap.timeLeft;
+  state.lastSnapStamp = performance.now();
 
   // 돌발 — 스파이크 드랍 상태 갱신
   setDropMarker();
@@ -1147,17 +1278,19 @@ socket.on("game:state", (snap) => {
     state.kills = mine.kills;
     state.deaths = mine.deaths;
     state.myTeam = mine.team || state.myTeam;
+    state.ultCharge = typeof mine.ultCharge === "number" ? mine.ultCharge : state.ultCharge;
     if (mine.hasSpike) state.spike.carrierId = mine.id;
   }
 
   state.scores.red = snap.scores.red;
   state.scores.blue = snap.scores.blue;
 
-  // 자기 좌표 보정 (서버)
+  // 자기 좌표 보정 (서버) — 수직도 포함
   const self = snap.players.find(p => p.id === state.myId);
   if (self) {
     const dx = state.x - self.x, dz = state.z - self.z;
     if (Math.hypot(dx, dz) > RECONCILE_DIST) { state.x = self.x; state.z = self.z; state.vx = 0; state.vz = 0; }
+    if (Math.abs(state.y - (self.y || 0)) > 0.6) { state.y = self.y || 0; state.vy = 0; }
   }
 
   // 리모트
@@ -1170,11 +1303,21 @@ socket.on("game:state", (snap) => {
       const mesh = makePlayerMesh(p);
       scene.add(mesh.group);
       mesh.group.position.set(p.x, 0, p.z);
+      mesh.group.position.y = p.y || 0;
       mesh.group.rotation.y = p.yaw;
-      ent = { group: mesh.group, hpBar: mesh.hpBar, target: { x: p.x, z: p.z, yaw: p.yaw, hp: p.hp } };
+      ent = { group: mesh.group, hpBar: mesh.hpBar, target: { x: p.x, y: p.y || 0, z: p.z, yaw: p.yaw, hp: p.hp }, px: p.x, pz: p.z, pt: snap.t, vx: 0, vz: 0 };
       state.players.set(p.id, ent);
     }
+    if (ent.px != null && snap.t !== ent.pt) {
+      const dtx = (snap.t - ent.pt) || 1;
+      ent.vx = (p.x - ent.px) * (SERVER_TICK_RATE / dtx);
+      ent.vz = (p.z - ent.pz) * (SERVER_TICK_RATE / dtx);
+    }
+    ent.px = p.x;
+    ent.pz = p.z;
+    ent.pt = snap.t;
     ent.target.x = p.x;
+    ent.target.y = p.y || 0;
     ent.target.z = p.z;
     ent.target.yaw = p.yaw;
     ent.target.hp = p.hp;
@@ -1183,6 +1326,10 @@ socket.on("game:state", (snap) => {
   for (const [id, ent] of state.players) {
     if (!seen.has(id)) { scene.remove(ent.group); state.players.delete(id); }
   }
+
+  // 스모크 동기화 (스냅샷) — born/dur 모두 서버 초 단위
+  state.smokes = (snap.smokes || []).map(sm => ({ id: sm.id, x: sm.x, z: sm.z, r: sm.r, born: sm.born || 0, dur: sm.dur }));
+  syncSmokeMeshes();
 
   // 구매 단계 자동 오픈 (조인/재진입)
   if (state.phase === "buy" && !state.joinBuyOpened && !buyUIOpen()) {
@@ -1210,7 +1357,7 @@ socket.on("round:start", (d) => {
   state.myHP = 150;
   state.joinBuyOpened = true;
   // 새 라운드 스폰 방향으로 카메라 정렬 (발로란트: 라운드마다 시야 리셋)
-  state.yaw = state.myTeam === "red" ? Math.PI : 0;
+  state.yaw = state.myTeam === "red" ? 0 : Math.PI;
   state.pitch = 0;
   openBuyUI();
   ui.update();
@@ -1245,14 +1392,25 @@ socket.on("game:buy", (d) => {
 });
 
 socket.on("game:fx", (fx) => {
+  // 내가 쏜 총알은 총구 앞에서부터 트레이서 시작 (시야 확보 — 특히 스나이퍼)
+  let ox = fx.ox, oy = fx.oy, oz = fx.oz;
+  if (fx.shooter === state.myId) {
+    const cast = 0.42;
+    const len = Math.hypot(fx.dx, fx.dy, fx.dz) || 1;
+    ox += (fx.dx / len) * cast;
+    oy += (fx.dy / len) * cast;
+    oz += (fx.dz / len) * cast;
+  }
   const mat = new THREE.LineBasicMaterial({ color: fx.hit ? 0xffe066 : 0xcfd8e6, transparent: true, opacity: 0.9 });
   const geo = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(fx.ox, fx.oy, fx.oz),
+    new THREE.Vector3(ox, oy, oz),
     new THREE.Vector3(fx.hitX, fx.hitY, fx.hitZ),
   ]);
   const line = new THREE.Line(geo, mat);
   scene.add(line);
-  state.tracers.push({ line, born: performance.now() });
+  // 스나이퍼는 더 길게/밝게 표시
+  const life = fx.weapon === "sr" ? 0.16 : 0.09;
+  state.tracers.push({ line, born: performance.now(), life });
   if (fx.shooter === state.myId && fx.snd !== false) Sfx.shot(fx.weapon);
   if (fx.shooter === state.myId && fx.hit) showHitMarker();
   if (fx.hit) {
@@ -1263,6 +1421,22 @@ socket.on("game:fx", (fx) => {
     scene.add(sprite);
     state.impacts.push({ sprite, born: performance.now() });
   }
+});
+
+socket.on("skill:smoke", (d) => {
+  if (!state.inGame) return;
+  state.smokes.push({ id: "evt_" + performance.now(), x: d.x, z: d.z, r: d.r || 4.5, born: performance.now() / 1000, dur: d.dur || SMOKE_DURATION });
+  syncSmokeMeshes();
+});
+
+socket.on("skill:ult", (d) => {
+  if (!state.inGame) return;
+  showUltTelegraph(d.x, d.z);
+});
+
+socket.on("skill:ultboom", (d) => {
+  if (!state.inGame) return;
+  showUltBoom(d.x, d.z);
 });
 
 socket.on("game:hurt", (d) => {
@@ -1403,10 +1577,26 @@ function animate(now) {
 
     // 반동 감쇠
     // (스프레드는 서버가 처리 — 클라 눈으로만 이동감 감쇠 표현)
-    const targetFov = state.ads ? 42 : 75;
+    const scopeFov = state.myWeapon === "sr" ? 26 : 42;
+    const targetFov = state.ads ? scopeFov : 75;
     state.cam.fov += (targetFov - state.cam.fov) * Math.min(1, dt * 12);
     camera.fov = state.cam.fov;
     camera.updateProjectionMatrix();
+
+    // 스나이퍼 스코프 오버레이
+    const scopeOvr = $("#scope-overlay");
+    if (state.myWeapon === "sr" && state.ads && state.alive) {
+      scopeOvr.classList.remove("hidden");
+    } else {
+      scopeOvr.classList.add("hidden");
+    }
+
+    // 화면 흔들림 (궁극기 폭발 등)
+    if (state.screenShake > 0.001) {
+      state.screenShake *= Math.pow(0.001, dt); // 빠르게 감쇠
+      camera.position.x += (Math.random() - 0.5) * state.screenShake;
+      camera.position.y += (Math.random() - 0.5) * state.screenShake;
+    }
 
     // 뷰모델 ADS 위치 (x는 항상 중앙 고정)
     const vx = 0;
@@ -1417,7 +1607,7 @@ function animate(now) {
     viewmodel.position.z += (vz - viewmodel.position.z) * Math.min(1, dt * 14);
   }
 
-  camera.position.set(state.x, EYE_HEIGHT, state.z);
+  camera.position.set(state.x, EYE_HEIGHT + state.y, state.z);
   const dx = Math.sin(state.yaw) * Math.cos(state.pitch);
   const dy = Math.sin(state.pitch);
   const dz = Math.cos(state.yaw) * Math.cos(state.pitch);
@@ -1427,12 +1617,17 @@ function animate(now) {
   const dot = $("#crosshair");
   dot.classList.toggle("ads", state.ads);
 
-  /* 리모트 보간 */
+  /* 리모트 보간 + 서버 레이턴시 예보(외삽) */
+  const estDelay = (now - state.lastSnapStamp) / 1000;
+  const extrap = Math.min(0.12, Math.max(0, estDelay));
   for (const [, ent] of state.players) {
     const g = ent.group;
     const t = 1 - Math.exp(-dt * 14);
-    g.position.x += (ent.target.x - g.position.x) * t;
-    g.position.z += (ent.target.z - g.position.z) * t;
+    let ex = ent.target.x, ez = ent.target.z;
+    if (ent.vx || ent.vz) { ex += ent.vx * extrap * 2; ez += ent.vz * extrap * 2; }
+    g.position.x += (ex - g.position.x) * t;
+    g.position.z += (ez - g.position.z) * t;
+    g.position.y += (ent.target.y - g.position.y) * t;
     g.rotation.y += angDiff(ent.target.yaw, g.rotation.y) * t;
   }
 
@@ -1440,8 +1635,9 @@ function animate(now) {
   for (let i = state.tracers.length - 1; i >= 0; i--) {
     const tr = state.tracers[i];
     const age = (now - tr.born) / 1000;
-    if (age > 0.09) { scene.remove(tr.line); tr.line.geometry.dispose(); tr.line.material.dispose(); state.tracers.splice(i, 1); }
-    else tr.line.material.opacity = 0.9 * (1 - age / 0.09);
+    const life = tr.life || 0.09;
+    if (age > life) { scene.remove(tr.line); tr.line.geometry.dispose(); tr.line.material.dispose(); state.tracers.splice(i, 1); }
+    else tr.line.material.opacity = 0.9 * (1 - age / life);
   }
   for (let i = state.impacts.length - 1; i >= 0; i--) {
     const ip = state.impacts[i];
@@ -1451,6 +1647,26 @@ function animate(now) {
       ip.sprite.scale.set(0.5 + age * 2, 0.5 + age * 2, 1);
       ip.sprite.material.opacity = Math.max(0, 0.9 * (1 - age / 0.35));
     }
+  }
+
+  /* 연막 수명/강도 (born/dur 초 단위) */
+  const smNowS = now / 1000;
+  for (let i = state.smokes.length - 1; i >= 0; i--) {
+    const sm = state.smokes[i];
+    const age = smNowS - sm.born;
+    if (age > sm.dur + 0.5) {
+      state.smokes.splice(i, 1);
+      const mesh = smokeMeshes.get(sm.id);
+      if (mesh) { scene.remove(mesh.mesh); if (mesh.inner) scene.remove(mesh.inner); smokeMeshes.delete(sm.id); }
+    }
+  }
+  for (const [id, m] of smokeMeshes) {
+    const sm = state.smokes.find(s => s.id === id);
+    if (!sm) continue;
+    const ageS = smNowS - sm.born;
+    const fade = Math.min(1, Math.max(0.25, 1 - (ageS - (sm.dur - 1.5)) / 1.5));
+    m.mesh.material.opacity = 0.4 * fade;
+    m.inner.material.opacity = 0.5 * fade;
   }
 
   /* 스파이크 설치/해체 진행중 — 진행바 표시 */
@@ -1469,9 +1685,9 @@ function animate(now) {
     plantHoldStart = null;
   }
 
-  /* 입력 전송 */
+  /* 입력 전송 — 원점(위치) 신선도 유지: 34ms 샘플 */
   const nowMs = now;
-  if (state.phase === "combat" && state.alive && nowMs - state.lastInput >= INPUT_INTERVAL * 2) {
+  if (state.phase === "combat" && state.alive && nowMs - state.lastInput >= INPUT_SAMPLE_MS) {
     state.lastInput = nowMs;
     socket.emit("game:input", {
       keys: state.keys, yaw: state.yaw, pitch: state.pitch,

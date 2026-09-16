@@ -143,6 +143,48 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 #ammo { font-size: 18px; font-weight: 700; color: #ffd75f; margin-top: 3px; }
 #ammo.low { color: #ff5f5f; }
 
+/* ==================== 스킬 HUD ==================== */
+#skill-hud {
+  position: absolute; right: 20px; bottom: 110px; display: flex; gap: 10px; align-items: flex-end;
+}
+.skill-card {
+  position: relative; width: 86px; background: rgba(13,17,25,.6); border: 1px solid #2a3242;
+  border-radius: 10px; padding: 8px 6px 6px; text-align: center;
+}
+.skill-card .skill-icon { font-size: 20px; }
+.skill-card .skill-label { font-size: 11px; color: #9aa5b5; }
+.skill-card .skill-key {
+  position: absolute; top: 4px; right: 6px; font-size: 10px; font-weight: 700; color: #5fd1ff;
+}
+.skill-card .skill-bar { font-size: 12px; font-weight: 800; color: #ffd75f; margin-top: 2px; }
+.skill-card.ready .skill-icon { animation: skillpulse 1s ease-in-out infinite; }
+@keyframes skillpulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.2); } }
+
+/* ==================== 스나이퍼 스코프 ==================== */
+#scope-overlay {
+  position: absolute; inset: 0; pointer-events: none; z-index: 12;
+  background:
+    radial-gradient(ellipse at center, rgba(0,0,0,0) 26%, rgba(0,0,0,.85) 72%, rgba(0,0,0,.95) 100%),
+    linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,.55));
+}
+.scope-ring {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 46vh; height: 46vh; max-width: 70vw; max-height: 70vw;
+  border: 2px solid rgba(0,0,0,.9); border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 0 0 2px rgba(0,0,0,.6), 0 0 14px rgba(255,255,255,.12);
+}
+.scope-line {
+  position: absolute; left: 50%; top: 50%; background: rgba(0,0,0,.9);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.25);
+}
+.scope-line.sl-h { width: 10vw; max-width: 160px; height: 3px; transform: translate(-50%, -50%); }
+.scope-line.sl-v { height: 10vh; max-height: 160px; width: 3px; transform: translate(-50%, -50%); }
+.scope-dot {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 3px; height: 3px; background: #ff3b3b; border-radius: 50%;
+  box-shadow: 0 0 4px rgba(255,80,80,.9);
+}
+
 #hitmarker {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   font-size: 28px; color: #ff4d4d; font-weight: 700; text-shadow: 0 0 8px #ff0000aa;

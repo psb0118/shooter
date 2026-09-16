@@ -38,6 +38,24 @@ const SHOT_RANGE = 250;
 const MAX_ORIGIN_DIST = 2.0; // 클라 예측 좌표로 쏜 원점을 서버 위치와 얼마나 벗어날 수 있는지 상한
 const MAX_HP = 150;
 
+/* ---- 점프 ---- */
+const JUMP_VEL = 6.8;       // 초기 수직 속도 (정지 높이 ~1.28m)
+const GRAVITY = 18;         // 중력 가속도
+
+/* ---- 스킬 (연막 / 궁극기) ---- */
+const SMOKE_RADIUS = 4.5;
+const SMOKE_DURATION = 10;  // 초
+const SMOKE_THROW_RANGE = 18;
+const SMOKE_COOLDOWN = 22;  // 초
+const ULT_THROW_RANGE = 18;
+const ULT_RADIUS = 5.5;
+const ULT_DMG = 90;
+const ULT_PENDING_TIME = 1.2;   // 궁극기 '낙뢰' 발동 전 유도선 (초)
+const ULT_CHARGE_KILL = 40;
+const ULT_CHARGE_PLANT = 25;
+const ULT_CHARGE_DEFUSE = 25;
+const ULT_CHARGE_MAX = 100;
+
 function clamp(v, mn, mx) { return v < mn ? mn : v > mx ? mx : v; }
 function dist2(ax, az, bx, bz) { const dx = ax - bx, dz = az - bz; return Math.sqrt(dx * dx + dz * dz); }
 function rnd(n) { return Math.floor(Math.random() * n); }
@@ -63,36 +81,49 @@ const MAP = {
   halfSize: 52,
   wallHeight: 5.5,
   obstacles: [
-    // 중앙 구조물
-    { x:  0,  z:  2,  w: 12, d: 12 },
-    { x:  0,  z: 16,  w:  8, d:  8 },
-    { x:  0,  z:-14,  w: 10, d: 10 },
-    // 동/서 레인 분리 벽
-    { x:-18,  z: -4,  w:  3, d: 22 },
-    { x: 18,  z: -4,  w:  3, d: 22 },
-    // 레인 중간 커버
-    { x:-32,  z: -8,  w:  6, d:  6 },
-    { x: 32,  z: -8,  w:  6, d:  6 },
-    // 사이트 진입 근접 커버 (접근 렌을 막지 않도록 렌 바깥쪽으로)
-    { x:-30,  z: 14,  w:  4, d:  8 },
-    { x: 30,  z: 14,  w:  4, d:  8 },
+    // 중앙 구조물 (타워 + 남북 블록 — 리듬 있는 배치)
+    { x:  0,  z:  0,  w: 12, d: 12 },
+    { x:  0,  z: 18,  w:  8, d:  8 },
+    { x:  0,  z:-16,  w: 10, d: 10 },
+    // 남쪽 중앙 보조 커버
+    { x:  0,  z:-30,  w:  3, d:  8 },
+    // 동/서 레인 분리 — 길이·위상 비대칭 (인위적 대칭 제거)
+    { x:-18,  z: -2,  w:  3, d: 14 },
+    { x: 18,  z:  6,  w:  3, d: 18 },
+    // 레인 중간 커버 (비대칭 배치)
+    { x:-32,  z:-10,  w:  5, d:  7 },
+    { x: 40,  z:-12,  w:  7, d:  5 },
+    // L자형 진입 커버 (서/동 비대칭)
+    { x:-31,  z: 12,  w:  4, d: 10 },
+    { x:-40,  z: 19,  w: 10, d:  4 },
+    { x: 31,  z: 18,  w:  4, d:  8 },
+    { x: 39,  z: 15,  w:  7, d:  4 },
     // 사이트 A 방어 커버
-    { x:-30,  z: 30,  w:  6, d:  6 },
-    { x:-18,  z: 24,  w:  6, d:  6 },
+    { x:-31,  z: 28,  w:  6, d:  6 },
+    { x:-17,  z: 27,  w:  6, d:  5 },
     // 사이트 B 방어 커버
-    { x: 30,  z: 30,  w:  6, d:  6 },
-    { x: 18,  z: 24,  w:  6, d:  6 },
-    // 공격측 등진 커버 (렌 한가운데를 막지 않도록 외곽 벽에 붙임)
-    { x:-34,  z:-30,  w:  4, d:  8 },
-    { x: 34,  z:-30,  w:  4, d:  8 },
-    { x:-14,  z:-30,  w:  8, d:  6 },
-    { x: 14,  z:-30,  w:  8, d:  6 },
-    // 수비측 배후 커버
+    { x: 32,  z: 29,  w:  6, d:  5 },
+    { x: 18,  z: 28,  w:  4, d:  6 },
+    // 중앙-사이트 사이 핀치 커버
+    { x:-12,  z: 24,  w:  5, d:  6 },
+    { x: 12,  z: 30,  w:  5, d:  5 },
+    // 공격측 등진 커버 (외곽 벽에 붙임)
+    { x:-38,  z:-34,  w:  4, d: 10 },
+    { x: 38,  z:-28,  w:  5, d:  8 },
+    // 공격 스폰 근처 스나이퍼 포치 (비대칭)
+    { x:-16,  z:-36,  w:  6, d:  4 },
+    { x: 16,  z:-38,  w:  6, d:  4 },
+    // 수비측 배후 커버 (비대칭)
     { x:-30,  z: 44,  w: 10, d:  4 },
-    { x: 30,  z: 44,  w: 10, d:  4 },
-    // 넓은 플랭크 벽
-    { x:-42,  z: -8,  w:  4, d: 30 },
-    { x: 42,  z: -8,  w:  4, d: 30 },
+    { x: 32,  z: 43,  w:  8, d:  4 },
+    // 넓은 플랭크 벽 (좌우 길이 다르게)
+    { x:-44,  z:-12,  w:  4, d: 26 },
+    { x: 44,  z:-20,  w:  4, d: 34 },
+    // 극단 플랭크 근접 커버 (사선 느낌의 스태거)
+    { x:-47,  z:-34,  w:  4, d:  8 },
+    { x:-44,  z:-48,  w:  4, d:  8 },
+    { x: 46,  z:-42,  w:  6, d:  4 },
+    { x: 43,  z:-30,  w:  6, d:  3 },
   ],
   spawns: {
     attack: [
@@ -209,14 +240,19 @@ function lossBonus(streak) {
 function createPlayer(id, nickname, team, spawnIndex) {
   const role = team === "red" ? "attack" : "defend";
   const s = MAP.spawns[role][spawnIndex % MAP.spawns[role].length];
+  // 플레이어별 유니크 색상 (알록달록)
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
+  const playerColor = Math.abs(hash) % 360;
   return {
     id,
     nickname: nickname || "플레이어",
     team,
+    playerColor,
     x: s.x, y: 0, z: s.z,
-    yaw: role === "attack" ? Math.PI : 0,
+    yaw: role === "attack" ? 0 : Math.PI,
     pitch: 0,
-    vx: 0, vz: 0,
+    vx: 0, vz: 0, vy: 0,
     cx: null, cz: null,      // 클라 예측 좌표(사격 원점용, 서버 위치와 2m 내 제한)
     hp: MAX_HP,
     alive: true,
@@ -233,11 +269,14 @@ function createPlayer(id, nickname, team, spawnIndex) {
     plantingProgress: 0,
     defusing: false,
     ads: false,
-    keys: { w: false, a: false, s: false, d: false, shift: false },
+    keys: { w: false, a: false, s: false, d: false, shift: false, space: false },
+    prevSpace: false,
     firing: false,
     kills: 0,
     deaths: 0,
     walkIndex: 0,
+    smokeReadyAt: 0,
+    ultCharge: 0,
   };
 }
 
@@ -292,11 +331,20 @@ function shootRay(player, now) {
       { cx: t.x, cy: 0.28, cz: t.z, r: 0.36, part: "legs" },
     ];
 
-    for (const sphere of targets) {
+      for (const sphere of targets) {
       const tHit = raySphere(ox, oy, oz, dx, dy, dz, sphere.cx, sphere.cy, sphere.cz, sphere.r);
       if (tHit == null || tHit > SHOT_RANGE) continue;
 
       let blocked = false;
+      // 연막 차단
+      const smokes = player._match.smokes || [];
+      const now = player._match._now();
+      for (const sm of smokes) {
+        if (now - sm.born >= sm.dur) continue;
+        const tSmoke = raySphere(ox, oy, oz, dx, dy, dz, sm.x, EYE_HEIGHT * 0.75, sm.z, sm.r);
+        if (tSmoke != null && tSmoke < tHit) { blocked = true; break; }
+      }
+      if (blocked) continue;
       for (const box of MAP.obstacles) {
         const tBox = rayBox(ox, oy, oz, dx, dy, dz, box);
         if (tBox != null && tBox < tHit) { blocked = true; break; }
@@ -362,6 +410,8 @@ function createMatch(roomId) {
       defusingId: null,
       defuseProgress: 0,
     },
+    smokes: [],              // [{id, x, z, r, born, dur}]
+    pendingUlts: [],         // [{id, x, z, t}] 낙뢰 예정
     startedAt: 0,
 
     _now() { return performance.now() / 1000; },
@@ -425,6 +475,8 @@ function createMatch(roomId) {
       match.spike.plantingId = null;
       match.spike.defusingId = null;
       match.spike.defuseProgress = 0;
+      match.smokes = [];
+      match.pendingUlts = [];
 
       const attackers = [];
       for (const [, p] of match._playerMap) {
@@ -445,12 +497,14 @@ function createMatch(roomId) {
         p.planting = false;
         p.plantingProgress = 0;
         p.defusing = false;
-        p.keys = { w: false, a: false, s: false, d: false, shift: false };
+        p.keys = { w: false, a: false, s: false, d: false, shift: false, space: false };
+        p.vy = 0;
+        p.smokeReadyAt = 0;
         const role = match.roleOf(p.team);
         const s = MAP.spawns[role][p.walkIndex % MAP.spawns[role].length];
         p.x = s.x; p.y = 0; p.z = s.z;
         p.cx = p.x; p.cz = p.z;
-        p.yaw = role === "attack" ? Math.PI : 0;
+        p.yaw = role === "attack" ? 0 : Math.PI;
         p.walkIndex++;
         if (role === "attack") attackers.push(p);
       }
@@ -518,6 +572,7 @@ function createMatch(roomId) {
         p.keys.s     = !!data.keys.s;
         p.keys.d     = !!data.keys.d;
         p.keys.shift = !!data.keys.shift;
+        p.keys.space = !!data.keys.space;
       }
       if (typeof data.yaw === "number")   p.yaw = data.yaw;
       if (typeof data.pitch === "number") p.pitch = data.pitch;
@@ -600,6 +655,49 @@ function createMatch(roomId) {
       }
     },
 
+    /* ---- 스킬 (연막 / 궁극기) ---- */
+    skill(id, data) {
+      const p = match._playerMap.get(id);
+      if (!p || !p.alive || match.phase !== "combat") return;
+      const now = match._now();
+      const cp = Math.cos(p.pitch);
+      const dirX = Math.sin(p.yaw) * cp;
+      const dirY = Math.sin(p.pitch);
+      const dirZ = Math.cos(p.yaw) * cp;
+      const ox = p.x, oy = EYE_HEIGHT, oz = p.z;
+
+      if (data.type === "smoke") {
+        if (now < p.smokeReadyAt) return;
+        p.smokeReadyAt = now + SMOKE_COOLDOWN;
+        // 투사체 도착: 장애물 또는 사거리
+        let landT = SMOKE_THROW_RANGE;
+        for (const box of MAP.obstacles) {
+          const t = rayBox(ox, oy, oz, dirX, dirY, dirZ, box);
+          if (t != null && t > 0.5 && t < landT) landT = t;
+        }
+        const sx = ox + dirX * landT;
+        const sz = oz + dirZ * landT;
+        match.smokes.push({ id: "smoke_" + id + "_" + match.tickCount, x: sx, z: sz, r: SMOKE_RADIUS, born: now, dur: SMOKE_DURATION });
+        return [{ type: "skill:smoke", pid: id, x: sx, z: sz, r: SMOKE_RADIUS, dur: SMOKE_DURATION }];
+      }
+
+      if (data.type === "ult") {
+        if (p.ultCharge < ULT_CHARGE_MAX) return;
+        p.ultCharge = 0;
+        let landT = ULT_THROW_RANGE;
+        for (const box of MAP.obstacles) {
+          const t = rayBox(ox, oy, oz, dirX, dirY, dirZ, box);
+          if (t != null && t > 0.5 && t < landT) landT = t;
+        }
+        const ux = ox + dirX * landT;
+        const uz = oz + dirZ * landT;
+        match.pendingUlts.push({ id: id, x: ux, z: uz, t: now + ULT_PENDING_TIME });
+        return [{ type: "skill:ult", pid: id, x: ux, z: uz }];
+      }
+
+      return [];
+    },
+
     /* ---- 발사 ---- */
 
     _applyShot(actor, result, events) {
@@ -613,6 +711,7 @@ function createMatch(roomId) {
         victim.deaths++;
         actor.kills++;
         actor.money = clamp(actor.money + MONEY_KILL, 0, MAX_MONEY);
+        actor.ultCharge = Math.min(ULT_CHARGE_MAX, actor.ultCharge + ULT_CHARGE_KILL);
         events.push({ type: "kill", killerId: actor.id, killerName: actor.nickname, killerTeam: actor.team, weapon: actor.weapon, victimId: victim.id, victimName: victim.nickname, victimTeam: victim.team, headshot: result.head });
 
         // 캐리어 사망 → 스파이크 드랍
@@ -643,6 +742,7 @@ function createMatch(roomId) {
             s.planted = false;
             s.defusingId = null;
             s.defuseProgress = 0;
+            def.ultCharge = Math.min(ULT_CHARGE_MAX, def.ultCharge + ULT_CHARGE_DEFUSE);
             events.push({ type: "spikedefuse", byId: def.id });
             match._endRound(match.defendTeam, "defuse", events);
             return;
@@ -673,6 +773,7 @@ function createMatch(roomId) {
           planter.planting = false;
           match.timeLeft = SPIKE_TIME;
           planter.money = clamp(planter.money + MONEY_PLANT, 0, MAX_MONEY);
+          planter.ultCharge = Math.min(ULT_CHARGE_MAX, planter.ultCharge + ULT_CHARGE_PLANT);
           events.push({ type: "spikeplant", pid: planter.id, x: planter.x, z: planter.z, timeLeft: SPIKE_TIME });
         }
       } else if (s.plantingId) {
@@ -752,6 +853,23 @@ function createMatch(roomId) {
             p.z = clamp(p.z, -hs, hs);
           }
 
+          // 점프 (누르는 순간 1회 — 홀드 시 반복 점프를 막기 위해 상승 에지)
+          if (
+            p.y <= 0 &&
+            p.keys.space &&
+            !p.prevSpace &&
+            !p.planting &&
+            !p.defusing
+          ) {
+            p.vy = JUMP_VEL;
+          }
+          p.prevSpace = p.keys.space;
+          if (p.y > 0 || p.vy > 0) {
+            p.vy -= GRAVITY * dt;
+            p.y += p.vy * dt;
+            if (p.y <= 0) { p.y = 0; p.vy = 0; }
+          }
+
           // 사격 (전투 단계만)
           if (match.phase === "combat" && !p.reloading && p.ammo > 0) {
             const wpn = WEAPONS[p.weapon];
@@ -776,6 +894,33 @@ function createMatch(roomId) {
             }
           }
         }
+      }
+
+      // 연막 만료
+      match.smokes = match.smokes.filter(sm => now - sm.born < sm.dur);
+
+      // 궁극기 발동 (낙뢰)
+      for (let i = match.pendingUlts.length - 1; i >= 0; i--) {
+        const pu = match.pendingUlts[i];
+        if (now < pu.t) continue;
+        match.pendingUlts.splice(i, 1);
+        // 범위 내 적 데미지
+        for (const [, ep] of match._playerMap) {
+          if (!ep.alive || ep.team === match._playerMap.get(pu.id)?.team) continue;
+          const d = dist2(ep.x, ep.z, pu.x, pu.z);
+          if (d <= ULT_RADIUS + PLAYER_RADIUS) {
+            ep.hp -= ULT_DMG;
+            events.push({ type: "hurt", pid: ep.id, byId: pu.id, dmg: ULT_DMG, headshot: false, hp: Math.max(0, ep.hp), hpMax: MAX_HP });
+            if (ep.hp <= 0) {
+              ep.alive = false; ep.hp = 0; ep.deaths++;
+              const killer = match._playerMap.get(pu.id);
+              if (killer) { killer.kills++; killer.money = clamp(killer.money + MONEY_KILL, 0, MAX_MONEY); killer.ultCharge = Math.min(ULT_CHARGE_MAX, killer.ultCharge + ULT_CHARGE_KILL); }
+              events.push({ type: "kill", killerId: pu.id, killerName: killer?.nickname||"?", killerTeam: killer?.team||"?", weapon: "ult", victimId: ep.id, victimName: ep.nickname, victimTeam: ep.team, headshot: false });
+              if (match.spike.carrierId === ep.id) { match.spike.carrierId = null; ep.hasSpike = false; match.spike.dropped = true; match.spike.dropX = ep.x; match.spike.dropZ = ep.z; }
+            }
+          }
+        }
+        events.push({ type: "skill:ultboom", x: pu.x, z: pu.z, r: ULT_RADIUS });
       }
 
       // 스파이크 진행 (전투 단계)
@@ -827,9 +972,17 @@ function createMatch(roomId) {
       const tx = b.x, ty = 1.0, tz = b.z;
       const dx = tx - ox, dy = ty - oy, dz = tz - oz;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const end = 1 - 0.1 / dist; // 타깃 직전까지만 차단 (미터→노말라이즈 환산)
       for (const box of MAP.obstacles) {
         const t = rayBox(ox, oy, oz, dx, dy, dz, box);
-        if (t != null && t > 0.3 && t < dist - 0.1) return false;
+        if (t != null && t > 0.3 && t < end) return false;
+      }
+      // 연막 시야 차단
+      const now = match._now();
+      for (const sm of match.smokes) {
+        if (now - sm.born >= sm.dur) continue;
+        const tSmoke = raySphere(ox, oy, oz, dx, dy, dz, sm.x, EYE_HEIGHT * 0.75, sm.z, sm.r);
+        if (tSmoke != null && tSmoke > 0.3 && tSmoke < end) return false;
       }
       return true;
     },
@@ -846,9 +999,10 @@ function createMatch(roomId) {
       const players = [];
       for (const [, p] of match._playerMap) {
         players.push({
-          id: p.id, nickname: p.nickname, team: p.team,
+          id: p.id, nickname: p.nickname, team: p.team, playerColor: p.playerColor,
           x: p.x, y: p.y, z: p.z,
           yaw: p.yaw, pitch: p.pitch,
+          vy: p.vy,
           hp: p.hp, alive: p.alive,
           kills: p.kills, deaths: p.deaths,
           weapon: p.weapon, ammo: p.ammo,
@@ -858,8 +1012,11 @@ function createMatch(roomId) {
           planting: p.planting,
           defusing: p.defusing,
           sprinting: p.keys.shift && (p.keys.w || p.keys.a || p.keys.s || p.keys.d),
+          ultCharge: p.ultCharge,
         });
       }
+      const now = match._now();
+      const smokes = match.smokes.filter(sm => now - sm.born < sm.dur).map(sm => ({ id: sm.id, x: sm.x, z: sm.z, r: sm.r, born: sm.born, dur: sm.dur }));
       return {
         t: match.tickCount,
         phase: match.phase,
@@ -881,6 +1038,8 @@ function createMatch(roomId) {
           defusingId: match.spike.defusingId,
           defuseProgress: match.spike.defuseProgress,
         },
+        smokes,
+        pendingUlts: match.pendingUlts.map(pu => ({ x: pu.x, z: pu.z, t: pu.t })),
         players,
         finished: match.finished,
         winner: match.winner,
@@ -891,4 +1050,4 @@ function createMatch(roomId) {
   return match;
 }
 
-module.exports = { WEAPONS, MAP, TICK_RATE, STATE_RATE, createMatch };
+module.exports = { WEAPONS, MAP, TICK_RATE, STATE_RATE, createMatch, EYE_HEIGHT, SMOKE_RADIUS, SMOKE_COOLDOWN, SMOKE_DURATION, ULT_RADIUS, ULT_DMG, ULT_CHARGE_KILL };

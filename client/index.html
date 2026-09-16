@@ -34,7 +34,7 @@
       <div id="lobby-room" class="hidden">
         <div class="room-code-label">방 코드</div>
         <div id="room-code" class="room-code"></div>
-        <div class="lobby-note">방 코드를 친구에게 공유하세요.<br />먼저 <b>13라운드</b>를 이기면 승리! 스파이크를 설치하고 폭발시키세요.<br />PC: WASD 이동 · Shift 달리기 · LMB 사격 · 우클릭 조준(ADS) · R 재장전 · <b>E 설치/해체</b> · 1~5 무기 구매 · P 구매창<br />모바일: 왼쪽 조이스틱 이동 · 오른쪽 드래그 조준 · 🔫 발사 · ↻ 재장전 · ✋ 설치/해체</div>
+        <div class="lobby-note">방 코드를 친구에게 공유하세요.<br />먼저 <b>13라운드</b>를 이기면 승리! 스파이크를 설치하고 폭발시키세요.<br />PC: WASD 이동 · Shift 달리기 · <b>Space 점프</b> · LMB 사격 · 우클릭 조준(ADS) · R 재장전 · <b>E 설치/해체</b> · <b>Q 연막</b> · <b>X 궁극기</b> · 1~5 무기 구매 · P 구매창<br />모바일: 왼쪽 조이스틱 이동 · 오른쪽 드래그 조준 · 🔫 발사 · ↻ 재장전 · ✋ 설치/해체</div>
         <div id="player-list" class="player-list"></div>
         <button id="btn-start" class="btn primary big hidden">게임 시작</button>
       </div>
@@ -63,10 +63,13 @@
         <div class="set-keys">
           <span class="key">WASD</span><em>이동</em>
           <span class="key">Shift</span><em>달리기</em>
+          <span class="key">Space</span><em>점프</em>
           <span class="key">LMB</span><em>사격</em>
           <span class="key">RMB</span><em>조준</em>
           <span class="key">R</span><em>재장전</em>
           <span class="key">E</span><em>설치/해체</em>
+          <span class="key">Q</span><em>연막</em>
+          <span class="key">X</span><em>궁극기</em>
           <span class="key">P</span><em>구매</em>
         </div>
       </div>
@@ -131,6 +134,27 @@
     <div id="weapon-hud">
       <div id="weapon-name">PISTOL</div>
       <div id="ammo">12 / ∞</div>
+    </div>
+
+    <div id="skill-hud">
+      <div id="skill-smoke" class="skill-card" title="연막 [Q]">
+        <div class="skill-icon">🌫️</div>
+        <div class="skill-label">연막</div>
+        <div class="skill-key">Q</div>
+      </div>
+      <div id="skill-ult" class="skill-card" title="궁극기 [X]">
+        <div class="skill-icon">⚡</div>
+        <div class="skill-label">궁극기</div>
+        <div id="skill-ult-charge" class="skill-bar">0%</div>
+        <div class="skill-key">X</div>
+      </div>
+    </div>
+
+    <div id="scope-overlay" class="hidden">
+      <div class="scope-ring"></div>
+      <div class="scope-line sl-h"></div>
+      <div class="scope-line sl-v"></div>
+      <div class="scope-dot"></div>
     </div>
 
     <div id="killfeed"></div>
