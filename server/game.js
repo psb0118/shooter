@@ -223,6 +223,7 @@ function createPlayer(id, nickname, team, spawnIndex) {
     reloading: false,
     reloadEndAt: 0,
     lastShootAt: 0,
+    trigger: 0,             // 반자동 무기 방아쇠 상승 에지 (누른 순간 1회 발사)
     money: START_MONEY,
     survivedRound: false,
     hasSpike: false,
@@ -433,6 +434,7 @@ function createMatch(roomId) {
         p.alive = true;
         p.vx = 0; p.vz = 0;
         p.firing = false;
+        p.trigger = 0;
         p.ads = false;
         p.planting = false;
         p.plantingProgress = 0;
@@ -512,7 +514,12 @@ function createMatch(roomId) {
       }
       if (typeof data.yaw === "number")   p.yaw = data.yaw;
       if (typeof data.pitch === "number") p.pitch = data.pitch;
-      if (typeof data.firing === "boolean") p.firing = data.firing && match.phase === "combat";
+      if (typeof data.firing === "boolean") {
+        const next = data.firing && match.phase === "combat";
+        // 반자동 무기용 트리거: false→true 상승 에지에서 1회 발사
+        if (next && !p.firing) p.trigger++;
+        p.firing = next;
+      }
       if (typeof data.ads === "boolean")   p.ads = data.ads;
     },
 
@@ -731,9 +738,12 @@ function createMatch(roomId) {
           }
 
           // 사격 (전투 단계만)
-          if (match.phase === "combat" && p.firing && !p.reloading && p.ammo > 0) {
+          if (match.phase === "combat" && !p.reloading && p.ammo > 0) {
             const wpn = WEAPONS[p.weapon];
-            if (now - p.lastShootAt >= wpn.cadence) {
+            const canAuto = wpn.auto && p.firing && now - p.lastShootAt >= wpn.cadence;
+            const canSemi = !wpn.auto && p.trigger > 0 && now - p.lastShootAt >= wpn.cadence;
+            if (canAuto || canSemi) {
+              if (!wpn.auto) p.trigger--;
               p.lastShootAt = now;
               p.ammo--;
               const shots = wpn.pellets || 1;

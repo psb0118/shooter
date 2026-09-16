@@ -27,7 +27,12 @@ const TEAM_NAME = { red: "RED", blue: "BLUE" };
 const PHASE_LABEL = { waiting: "대기", buy: "구매", combat: "전투", roundover: "라운드 종료", finished: "경기 종료" };
 
 const $ = (sel) => document.querySelector(sel);
-const TOUCH = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+
+/* 모바일 기기 감지 — 터치스크린이 달린 PC/노트북(pointer: fine + 마우스 주 입력)은
+   데스크톱으로 취급해 모바일 UI를 띄우지 않는다. */
+const IS_PRIMARY_TOUCH = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+const IS_TOUCH_UA = /Android|iPhone|iPad|iPod|Mobi|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+const TOUCH = ("ontouchstart" in window || navigator.maxTouchPoints > 0) && (IS_PRIMARY_TOUCH || IS_TOUCH_UA);
 
 /* ================= 전역 상태 ================= */
 
@@ -629,6 +634,17 @@ function updateInteractHint() {
 
 /* ================= 포인터 락 ================= */
 
+let heldFire = false;   // 물리적으로 눌려 있는 좌클릭 (포인터 락 획득 클릭도 즉시 발사 처리)
+let heldAds = false;
+
+function flushInput() {
+  if (!state.inGame || !state.alive) return;
+  socket.emit("game:input", {
+    keys: state.keys, yaw: state.yaw, pitch: state.pitch,
+    firing: state.firing, ads: state.ads,
+  });
+}
+
 function pointerLocked() { return document.pointerLockElement === renderer.domElement; }
 function tryLock() {
   if (!state.inGame) return;
@@ -649,8 +665,15 @@ document.addEventListener("pointerlockchange", () => {
     state.firing = false;
     state.ads = false;
     if (state.inGame && !state.uiLock && !buyUIOpen() && $("#end-screen").classList.contains("hidden") && !state.planting && !state.defusing && state.phase === "combat") {
-      // 잠시 후 재조준 (사용자가 Esc로 열었을 때 방해하지 않도록)
-      setTimeout(tryLock, 250);
+      // 전투 중 락이 풀리면 '클릭해서 재개' 오버레이 표시 (브라우저 재락 쿨다운과 싸우지 않도록)
+      $("#pause").classList.remove("hidden");
+    }
+  } else {
+    $("#pause").classList.add("hidden");
+    // 락을 획득한 바로 그 클릭이 마우스를 누른 채면 즉시 발사 시작 (첫 클릭부터 발사 가능)
+    if (state.inGame && !state.uiLock) {
+      if (heldFire) { state.firing = true; flushInput(); }
+      if (heldAds) state.ads = true;
     }
   }
 });
@@ -667,13 +690,17 @@ renderer.domElement.addEventListener("mousedown", (e) => {
   if (!state.inGame || state.uiLock || buyUIOpen()) return;
   // 터치 장치에서 터치가 만들어낸 합성 mousedown(detail=0)은 무시 (스와이프 시야와 혼동 방지)
   if (TOUCH && e.detail === 0) return;
+  if (e.button === 0) heldFire = true;
+  else if (e.button === 2) heldAds = true;
   if (!pointerLocked()) { tryLock(); return; }
   if (e.button === 0) state.firing = true;
   else if (e.button === 2) state.ads = true;
+  // 즉시 전송: 68ms 샘플러 사이에 끝나는 짧은 클릭(탭)이 유실되지 않도록
+  flushInput();
 });
 window.addEventListener("mouseup", (e) => {
-  if (e.button === 0) state.firing = false;
-  else if (e.button === 2) state.ads = false;
+  if (e.button === 0) { heldFire = false; state.firing = false; flushInput(); }
+  else if (e.button === 2) { heldAds = false; state.ads = false; flushInput(); }
 });
 window.addEventListener("contextmenu", (e) => e.preventDefault());
 
@@ -715,7 +742,7 @@ document.addEventListener("touchstart", (e) => {
       joy.active = true; joy.id = t.identifier; joy.ox = t.clientX; joy.oy = t.clientY;
     } else if (t.target.classList.contains("btn-control")) {
       const id = t.target.id;
-      if (id === "btn-fire") state.firing = true;
+      if (id === "btn-fire") { state.firing = true; flushInput(); }
       else if (id === "btn-reload") { socket.emit("game:reload"); Sfx.reload(); }
       else if (id === "btn-swap") toggleBuyUI(false);
       else if (id === "btn-interact") startInteract(true);
@@ -749,7 +776,7 @@ document.addEventListener("touchend", (e) => {
     if (btnTimer.has(t.identifier)) {
       const id = btnTimer.get(t.identifier);
       btnTimer.delete(t.identifier);
-      if (id === "btn-fire") state.firing = false;
+      if (id === "btn-fire") { state.firing = false; flushInput(); }
       if (id === "btn-interact") startInteract(false);
     }
   }
@@ -761,10 +788,12 @@ document.addEventListener("touchcancel", (e) => {
     if (btnTimer.has(t.identifier)) {
       const id = btnTimer.get(t.identifier);
       btnTimer.delete(t.identifier);
+      if (id === "btn-fire") { state.firing = false; flushInput(); }
       if (id === "btn-interact") startInteract(false);
     }
   }
   state.firing = false;
+  flushInput();
 });
 
 function initTouchUI() {
@@ -780,6 +809,7 @@ function openBuyUI() {
   if ($("#weapon-select").classList.contains("hidden")) {
     state.uiLock = true;
     $("#weapon-select").classList.remove("hidden");
+    $("#pause").classList.add("hidden");
     exitLock();
     refreshBuyGrid();
   }
@@ -1129,6 +1159,7 @@ socket.on("round:start", (d) => {
   state.spike = { carrierId: null, dropped: false, dropX: 0, dropZ: 0, planted: false, plantX: 0, plantZ: 0, defusingId: null, defuseProgress: 0 };
   setDropMarker();
   $("#death-screen").classList.add("hidden");
+  $("#pause").classList.add("hidden");
   state.ads = false;
   state.firing = false;
   state.cam.fov = 75;
@@ -1183,6 +1214,7 @@ socket.on("game:fx", (fx) => {
   scene.add(line);
   state.tracers.push({ line, born: performance.now() });
   if (fx.shooter === state.myId && fx.snd !== false) Sfx.shot(fx.weapon);
+  if (fx.shooter === state.myId && fx.hit) showHitMarker();
   if (fx.hit) {
     const col = fx.weapon === "sr" ? 0xffd75f : 0xffffff;
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: col, transparent: true, opacity: 0.9 }));
@@ -1292,7 +1324,10 @@ $("#btn-back-lobby").addEventListener("click", () => {
   socket.emit("lobby:leave");
   enterLobbyUI();
 });
-$("#pause").addEventListener("click", tryLock);
+$("#pause").addEventListener("click", () => {
+  $("#pause").classList.add("hidden");
+  tryLock();
+});
 
 function enterLobbyUI() {
   state.inGame = false;
@@ -1427,6 +1462,14 @@ function flashDamage() {
   dv.style.opacity = 0.6;
   clearTimeout(dmgTimeout);
   dmgTimeout = setTimeout(() => { dv.style.opacity = 0; }, 280);
+}
+
+let hitTimeout = null;
+function showHitMarker() {
+  const hm = $("#hitmarker");
+  hm.classList.remove("hidden");
+  clearTimeout(hitTimeout);
+  hitTimeout = setTimeout(() => hm.classList.add("hidden"), 160);
 }
 
 /* ------------- 초기화 ------------- */
