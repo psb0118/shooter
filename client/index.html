@@ -41,10 +41,40 @@
     </div>
   </div>
 
-  <!-- ==================== 일시정지(포인터 재조준) ==================== -->
+  <!-- ==================== 일시정지 / 설정 (ESC) ==================== -->
   <div id="pause" class="overlay paused hidden">
     <div class="pause-box">
-      <p>클릭해서 조준 모드로 돌아가기</p>
+      <h3 class="pause-title">일시정지 · 설정</h3>
+      <p class="pause-sub">ESC로 열고 닫기 · 변경은 즉시 적용</p>
+
+      <div class="setting-row">
+        <label>마우스 감도</label>
+        <div class="setting-input">
+          <input type="range" id="set-sens" min="0.1" max="3" step="0.05" value="1" />
+          <span id="set-sens-val">1.00x</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>마우스 세로 반전</label>
+        <label class="switch"><input type="checkbox" id="set-invy" /><span class="slider"></span></label>
+      </div>
+
+      <div class="setting-row keys">
+        <div class="set-keys">
+          <span class="key">WASD</span><em>이동</em>
+          <span class="key">Shift</span><em>달리기</em>
+          <span class="key">LMB</span><em>사격</em>
+          <span class="key">RMB</span><em>조준</em>
+          <span class="key">R</span><em>재장전</em>
+          <span class="key">E</span><em>설치/해체</em>
+          <span class="key">P</span><em>구매</em>
+        </div>
+      </div>
+
+      <div class="pause-actions">
+        <button id="btn-resume" class="btn primary">재개</button>
+        <button id="btn-leave" class="btn">로비로 나가기</button>
+      </div>
     </div>
   </div>
 

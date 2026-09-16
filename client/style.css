@@ -203,7 +203,45 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
   75% { transform: translateX(calc(-50% + 8px)); }
 }
 
-/* ==================== 일시정지/사망/종료 ==================== */
+/* ==================== 일시정지/설정/사망/종료 ==================== */
+.pause-box {
+  width: 420px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
+  background: #141926; border: 1px solid #2a3242; border-radius: 14px;
+  padding: 26px 26px 20px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+}
+.pause-title { font-size: 22px; text-align: center; letter-spacing: 1px; }
+.pause-sub { text-align: center; color: #7c8698; font-size: 12px; margin: 6px 0 18px; }
+
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 2px; border-bottom: 1px solid #20283a; gap: 14px;
+}
+.setting-row label { font-size: 15px; color: #dfe5f0; white-space: nowrap; }
+.setting-input { display: flex; align-items: center; gap: 10px; flex: 1; max-width: 230px; }
+.setting-input input[type="range"] { flex: 1; accent-color: #2f5ef0; cursor: pointer; }
+#set-sens-val { min-width: 48px; text-align: right; color: #5fd1ff; font-weight: 700; font-size: 13px; }
+
+.switch { position: relative; display: inline-block; width: 44px; height: 24px; cursor: pointer; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider {
+  position: absolute; inset: 0; background: #2a3242; border-radius: 24px; transition: background .15s;
+}
+.switch .slider::before {
+  content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+  background: #c3cad8; border-radius: 50%; transition: transform .15s, background .15s;
+}
+.switch input:checked + .slider { background: #2f5ef0; }
+.switch input:checked + .slider::before { transform: translateX(20px); background: #fff; }
+
+.set-keys { display: flex; flex-wrap: wrap; gap: 10px; row-gap: 8px; align-items: center; }
+.set-keys em { font-style: normal; font-size: 13px; color: #7c8698; }
+.set-keys .key {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 22px; padding: 0 6px;
+  border: 1px solid #3a4557; border-radius: 5px;
+  background: rgba(255,255,255,.08); font-size: 12px; font-weight: 700; color: #dfe5f0;
+}
+
+.pause-actions { display: flex; gap: 10px; margin-top: 22px; }
 .pause-box p, .death-box .big { font-size: 22px; font-weight: 700; }
 .death-box { text-align: center; }
 .death-box .small { margin-top: 8px; color: #c3cad8; }

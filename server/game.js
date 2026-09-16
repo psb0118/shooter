@@ -35,6 +35,7 @@ const MOVE_SPEED = 5.5;
 const SPRINT_MULT = 1.55;
 const ACCEL = 12;
 const SHOT_RANGE = 250;
+const MAX_ORIGIN_DIST = 2.0; // 클라 예측 좌표로 쏜 원점을 서버 위치와 얼마나 벗어날 수 있는지 상한
 const MAX_HP = 150;
 
 function clamp(v, mn, mx) { return v < mn ? mn : v > mx ? mx : v; }
@@ -216,6 +217,7 @@ function createPlayer(id, nickname, team, spawnIndex) {
     yaw: role === "attack" ? Math.PI : 0,
     pitch: 0,
     vx: 0, vz: 0,
+    cx: null, cz: null,      // 클라 예측 좌표(사격 원점용, 서버 위치와 2m 내 제한)
     hp: MAX_HP,
     alive: true,
     weapon: "pistol",
@@ -261,9 +263,9 @@ function setWeaponFree(player, weaponId) {
 
 function shootRay(player, now) {
   const wpn = WEAPONS[player.weapon];
-  // 발로란트: 이동 중 사격은 크게 부정확, ADS 시 완화
+  // 발로란트: 이동 중 사격은 부정확, ADS 시 완화 — 단, 조준점에서 크게 벗어나기 전에 판정에 들어가도록 완만한 페널티
   const speed = Math.hypot(player.vx, player.vz);
-  const movePenalty = player.ads ? 1 + Math.min(0.5, speed * 0.10) : 1 + Math.min(2.0, speed * 0.45);
+  const movePenalty = player.ads ? 1 + Math.min(0.16, speed * 0.03) : 1 + Math.min(0.5, speed * 0.10);
   const spread = wpn.spread * (player.ads ? 0.35 : 1) * movePenalty;
   const jitter = () => (Math.random() - 0.5) * 2;
 
@@ -273,7 +275,11 @@ function shootRay(player, now) {
   const dx = Math.sin(y2) * cp;
   const dy = Math.sin(p2);
   const dz = Math.cos(y2) * cp;
-  const ox = player.x, oy = EYE_HEIGHT, oz = player.z;
+  // 사격 원점: 클라 예측 좌표(레이턴시 보정) — 서버 좌표와 2m 이내일 때만 사용
+  const nearPred = typeof player.cx === "number" && Math.hypot(player.cx - player.x, player.cz - player.z) <= MAX_ORIGIN_DIST;
+  const ox = nearPred ? player.cx : player.x;
+  const oz = nearPred ? player.cz : player.z;
+  const oy = EYE_HEIGHT;
 
   let best = null;
 
@@ -281,9 +287,9 @@ function shootRay(player, now) {
     if (t.id === player.id || !t.alive || t.team === player.team) continue;
 
     const targets = [
-      { cx: t.x, cy: 0.9,  cz: t.z, r: 0.55, part: "body" },
-      { cx: t.x, cy: 1.6,  cz: t.z, r: 0.28, part: "head" },
-      { cx: t.x, cy: 0.28, cz: t.z, r: 0.32, part: "legs" },
+      { cx: t.x, cy: 0.9,  cz: t.z, r: 0.62, part: "body" },
+      { cx: t.x, cy: 1.6,  cz: t.z, r: 0.3,  part: "head" },
+      { cx: t.x, cy: 0.28, cz: t.z, r: 0.36, part: "legs" },
     ];
 
     for (const sphere of targets) {
@@ -443,6 +449,7 @@ function createMatch(roomId) {
         const role = match.roleOf(p.team);
         const s = MAP.spawns[role][p.walkIndex % MAP.spawns[role].length];
         p.x = s.x; p.y = 0; p.z = s.z;
+        p.cx = p.x; p.cz = p.z;
         p.yaw = role === "attack" ? Math.PI : 0;
         p.walkIndex++;
         if (role === "attack") attackers.push(p);
@@ -514,6 +521,14 @@ function createMatch(roomId) {
       }
       if (typeof data.yaw === "number")   p.yaw = data.yaw;
       if (typeof data.pitch === "number") p.pitch = data.pitch;
+      // 클라 예측 좌표 → 사격 원점 (레이턴시 보정, 서버 위치와 2m 내 제한)
+      if (typeof data.x === "number" && typeof data.z === "number") {
+        if (Math.hypot(data.x - p.x, data.z - p.z) <= MAX_ORIGIN_DIST) {
+          p.cx = data.x; p.cz = data.z;
+        } else {
+          p.cx = p.x; p.cz = p.z;
+        }
+      }
       if (typeof data.firing === "boolean") {
         const next = data.firing && match.phase === "combat";
         // 반자동 무기용 트리거: false→true 상승 에지에서 1회 발사

@@ -234,7 +234,9 @@ function applyViewModel(weaponId) {
 function makeViewModel() {
   if (viewmodel) return viewmodel;
   viewmodel = new THREE.Group();
-  viewmodel.position.set(0.28, -0.28, -0.5);
+  // 총을 화면 중앙(조준점)에 정렬 — 오른쪽 어깨 배치 제거
+  viewmodel.position.set(0, -0.16, -0.48);
+  viewmodel.rotation.x = 0.06;
   camera.add(viewmodel);
   scene.add(camera);
   buildViewModel(state.myWeapon || "pistol");
@@ -641,6 +643,7 @@ function flushInput() {
   if (!state.inGame || !state.alive) return;
   socket.emit("game:input", {
     keys: state.keys, yaw: state.yaw, pitch: state.pitch,
+    x: state.x, z: state.z,
     firing: state.firing, ads: state.ads,
   });
 }
@@ -653,7 +656,10 @@ function tryLock() {
     !$("#end-screen").classList.contains("hidden") ||
     !$("#pause").classList.contains("hidden");
   if (!hasOverlay && !pointerLocked()) {
-    try { renderer.domElement.requestPointerLock(); } catch (e) {}
+    try {
+      const p = renderer.domElement.requestPointerLock();
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) {}
   }
 }
 function exitLock() {
@@ -664,8 +670,9 @@ document.addEventListener("pointerlockchange", () => {
   if (!pointerLocked()) {
     state.firing = false;
     state.ads = false;
-    if (state.inGame && !state.uiLock && !buyUIOpen() && $("#end-screen").classList.contains("hidden") && !state.planting && !state.defusing && state.phase === "combat") {
-      // 전투 중 락이 풀리면 '클릭해서 재개' 오버레이 표시 (브라우저 재락 쿨다운과 싸우지 않도록)
+    if (state.inGame && state.alive && !state.uiLock && !buyUIOpen() && $("#end-screen").classList.contains("hidden") && !state.planting && !state.defusing && state.phase === "combat") {
+      // 전투 중 락 해제(ESC) 시 설정 탭 표시
+      syncSettingsUI();
       $("#pause").classList.remove("hidden");
     }
   } else {
@@ -678,10 +685,43 @@ document.addEventListener("pointerlockchange", () => {
   }
 });
 
+/* ================= 설정 (ESC 메뉴) ================= */
+
+const SETTINGS = Object.assign(
+  { sens: 1, invertY: false },
+  JSON.parse(localStorage.getItem("shooter_settings") || "null") || {}
+);
+function saveSettings() {
+  localStorage.setItem("shooter_settings", JSON.stringify(SETTINGS));
+}
+function syncSettingsUI() {
+  $("#set-sens").value = SETTINGS.sens;
+  $("#set-sens-val").textContent = SETTINGS.sens.toFixed(2) + "x";
+  $("#set-invy").checked = SETTINGS.invertY;
+}
+$("#set-sens").addEventListener("input", (e) => {
+  SETTINGS.sens = parseFloat(e.target.value) || 1;
+  $("#set-sens-val").textContent = SETTINGS.sens.toFixed(2) + "x";
+  saveSettings();
+});
+$("#set-invy").addEventListener("change", (e) => {
+  SETTINGS.invertY = e.target.checked;
+  saveSettings();
+});
+$("#btn-resume").addEventListener("click", () => {
+  $("#pause").classList.add("hidden");
+  tryLock();
+});
+$("#btn-leave").addEventListener("click", () => {
+  $("#pause").classList.add("hidden");
+  socket.emit("lobby:leave");
+  enterLobbyUI();
+});
+
 document.addEventListener("mousemove", (e) => {
   if (!state.inGame || !pointerLocked()) return;
-  state.yaw -= e.movementX * SENS;
-  state.pitch = clamp(state.pitch - e.movementY * SENS, -1.52, 1.52);
+  state.yaw -= e.movementX * SENS * SETTINGS.sens;
+  state.pitch = clamp(state.pitch + e.movementY * SENS * SETTINGS.sens * (SETTINGS.invertY ? 1 : -1), -1.52, 1.52);
   const tau = Math.PI * 2;
   state.yaw = ((state.yaw % tau) + tau) % tau;
 });
@@ -763,8 +803,8 @@ document.addEventListener("touchmove", (e) => {
       const dx = t.clientX - look.lx;
       const dy = t.clientY - look.ly;
       look.lx = t.clientX; look.ly = t.clientY;
-      state.yaw -= dx * TOUCH_SENS;
-      state.pitch = clamp(state.pitch - dy * TOUCH_SENS, -1.52, 1.52);
+      state.yaw -= dx * TOUCH_SENS * SETTINGS.sens;
+      state.pitch = clamp(state.pitch + dy * TOUCH_SENS * SETTINGS.sens * (SETTINGS.invertY ? 1 : -1), -1.52, 1.52);
     }
   }
 }, { passive: false });
@@ -1324,9 +1364,11 @@ $("#btn-back-lobby").addEventListener("click", () => {
   socket.emit("lobby:leave");
   enterLobbyUI();
 });
-$("#pause").addEventListener("click", () => {
-  $("#pause").classList.add("hidden");
-  tryLock();
+$("#pause").addEventListener("click", (e) => {
+  if (e.target === $("#pause")) {
+    $("#pause").classList.add("hidden");
+    tryLock();
+  }
 });
 
 function enterLobbyUI() {
@@ -1366,10 +1408,10 @@ function animate(now) {
     camera.fov = state.cam.fov;
     camera.updateProjectionMatrix();
 
-    // 뷰모델 ADS 위치
-    const vx = state.ads ? 0 : 0.28;
-    const vy = state.ads ? -0.24 : -0.28;
-    const vz = state.ads ? -0.3 : -0.5;
+    // 뷰모델 ADS 위치 (x는 항상 중앙 고정)
+    const vx = 0;
+    const vy = state.ads ? -0.22 : -0.16;
+    const vz = state.ads ? -0.3 : -0.48;
     viewmodel.position.x += (vx - viewmodel.position.x) * Math.min(1, dt * 14);
     viewmodel.position.y += (vy - viewmodel.position.y) * Math.min(1, dt * 14);
     viewmodel.position.z += (vz - viewmodel.position.z) * Math.min(1, dt * 14);
@@ -1433,6 +1475,7 @@ function animate(now) {
     state.lastInput = nowMs;
     socket.emit("game:input", {
       keys: state.keys, yaw: state.yaw, pitch: state.pitch,
+      x: state.x, z: state.z,
       firing: state.firing, ads: state.ads,
     });
   }
