@@ -61,7 +61,13 @@ const state = {
   prevSpace: false,
   ultCharge: 0,
   map: null,
+  mapId: "center",
   weapons: {},
+  characters: {},
+  maps: {},
+  myChar: "vanguard",
+  speedMult: 1,
+  maxHp: 150,
   scores: { red: 0, blue: 0 },
   timeLeft: 100,
   phase: "waiting",
@@ -481,14 +487,14 @@ function syncSmokeMeshes() {
     if (smokeMeshes.has(sm.id)) continue;
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(sm.r, 24, 16),
-      new THREE.MeshBasicMaterial({ color: 0x6a7d99, transparent: true, opacity: 0.4, depthWrite: false })
+      new THREE.MeshBasicMaterial({ color: 0x6a7d99, transparent: true, opacity: 0.55, depthWrite: true })
     );
-    mesh.position.set(sm.x, 2.2, sm.z);
+    mesh.position.set(sm.x, 2.4, sm.z);
     const inner = new THREE.Mesh(
-      new THREE.SphereGeometry(sm.r * 0.55, 16, 10),
-      new THREE.MeshBasicMaterial({ color: 0x3c4757, transparent: true, opacity: 0.5, depthWrite: false })
+      new THREE.SphereGeometry(sm.r * 0.7, 16, 10),
+      new THREE.MeshBasicMaterial({ color: 0x3c4757, transparent: true, opacity: 0.5, depthWrite: true })
     );
-    inner.position.set(sm.x, 1.6, sm.z);
+    inner.position.set(sm.x, 1.7, sm.z);
     scene.add(mesh);
     scene.add(inner);
     smokeMeshes.set(sm.id, { mesh, inner, born: sm.born });
@@ -549,8 +555,9 @@ function circleAABB(px, pz, r, box) {
 }
 
 function predictStep(dt) {
-  const frozen = state.planting || state.defusing;
-  const speed = state.keys.shift ? SPRINT_MULT : 1;
+  // 구매/대기 단계에서는 이동 금지 (전투 시작 후에만 움직인다)
+  const frozen = state.planting || state.defusing || state.phase !== "combat";
+  const speed = (state.keys.shift ? SPRINT_MULT : 1) * (state.speedMult || 1);
   const y = state.yaw;
   let ix = 0, iz = 0;
   if (!frozen) {
@@ -780,8 +787,7 @@ function exitLock() {
 
 document.addEventListener("pointerlockchange", () => {
   if (!pointerLocked()) {
-    state.firing = false;
-    state.ads = false;
+    resetControls();
     if (state.inGame && state.alive && !state.uiLock && !buyUIOpen() && $("#end-screen").classList.contains("hidden") && !state.planting && !state.defusing && state.phase === "combat") {
       // 전투 중 락 해제(ESC) 시 설정 탭 표시
       syncSettingsUI();
@@ -796,6 +802,17 @@ document.addEventListener("pointerlockchange", () => {
     }
   }
 });
+
+// ESC/탭 전환 등으로 키가 갇히지 않도록 모든 입력 리셋 (무빙워크 방지)
+window.addEventListener("blur", resetControls);
+function resetControls() {
+  const wasHeld = state.firing || state.ads || state.keys.w || state.keys.a || state.keys.s || state.keys.d || state.keys.shift || state.keys.space;
+  state.keys.w = state.keys.a = state.keys.s = state.keys.d = state.keys.shift = state.keys.space = false;
+  state.prevSpace = false;
+  state.firing = false;
+  state.ads = false;
+  if (wasHeld && state.inGame) flushInput();
+}
 
 /* ================= 설정 (ESC 메뉴) ================= */
 
@@ -1123,6 +1140,78 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+/* 캐릭터/맵/무기 선택 카드 */
+function renderLobbySelect() {
+  const chars = state.characters || {};
+  const charEl = $("#char-select");
+  if (charEl && Object.keys(chars).length) {
+    charEl.innerHTML = Object.values(chars).map(ch => {
+      const hp = Math.round(150 * ch.hp);
+      return `<button class="pick-card ${ch.id === state.myChar ? "sel" : ""}" data-char="${ch.id}" type="button">
+        <div class="pk-top"><span class="pk-emoji">${ch.emoji || "🎯"}</span><span class="pk-name">${esc(ch.name)}</span></div>
+        <div class="pk-tags">체력 <b>${hp}</b> · 속도 <b>${Math.round(ch.speed * 100)}%</b></div>
+        <div class="pk-desc">${esc(ch.desc || "")}</div>
+        <div class="pk-skill">${esc(ch.skillDesc || "")}</div>
+        <div class="pk-ult">${esc(ch.ultDesc || "")}</div>
+      </button>`;
+    }).join("");
+    for (const b of charEl.querySelectorAll(".pick-card")) {
+      b.addEventListener("click", () => {
+        state.myChar = b.dataset.char;
+        state.speedMult = (chars[state.myChar]?.speed) || 1;
+        renderLobbySelect();
+      });
+    }
+  } else if (charEl) {
+    charEl.innerHTML = '<div class="pk-note">서버 연결 대기 중…</div>';
+  }
+
+  const mapsData = state.maps || {};
+  const mapEl = $("#map-select");
+  if (mapEl && Object.keys(mapsData).length) {
+    mapEl.innerHTML = Object.values(mapsData).map(m => `
+      <button class="pick-card ${m.id === state.mapId ? "sel" : ""}" data-map="${m.id}" type="button">
+        <div class="pk-top"><span class="pk-name">🗺️ ${esc(m.name)}</span></div>
+        <div class="pk-desc">${esc(m.desc || "")}</div>
+        <div class="pk-note">방 만들 때 맵이 결정됩니다</div>
+      </button>`).join("");
+    for (const b of mapEl.querySelectorAll(".pick-card")) {
+      b.addEventListener("click", () => {
+        state.mapId = b.dataset.map;
+        renderLobbySelect();
+      });
+    }
+  } else if (mapEl) {
+    mapEl.innerHTML = '<div class="pk-note">서버 연결 대기 중…</div>';
+  }
+
+  const weapons = state.weapons || {};
+  const wEl = $("#weapon-info");
+  if (wEl && Object.keys(weapons).length) {
+    wEl.innerHTML = Object.values(weapons).map(w => {
+      const auto = w.auto ? "자동" : "반자동";
+      return `<div class="ws-mini">
+        <div class="wm-name">${esc(w.name)}<em>${w.price === 0 ? "기본" : w.price.toLocaleString()}</em></div>
+        <div>몸통 <b>${w.body}</b> · 헤드 <b>${w.head}</b> · 다리 <b>${w.legs}</b></div>
+        <div>장탄 <b>${w.magSize}</b>발 · ${w.cadence}s · ${auto}</div>
+      </div>`;
+    }).join("");
+  } else if (wEl) {
+    wEl.innerHTML = '<div class="pk-note">서버 연결 대기 중…</div>';
+  }
+}
+
+/* 총구 섬광 — 사격 직후 짧게 '반짝' */
+let muzzleFlashT = 0;
+function addMuzzleFlash() {
+  const el = $("#muzzle-flash");
+  if (!el) return;
+  el.classList.remove("hidden", "flash");
+  void el.offsetWidth;
+  el.classList.add("flash");
+  muzzleFlashT = performance.now();
+}
+
 /* ================= 로비 UI ================= */
 
 function renderLobby(room) {
@@ -1180,6 +1269,13 @@ function clearMatchUI() {
 
 socket.on("connect", () => { state.myId = socket.id; });
 
+socket.on("server:ready", (d) => {
+  if (d.characters) state.characters = d.characters;
+  if (d.weapons) state.weapons = d.weapons;
+  if (d.maps) state.maps = d.maps;
+  renderLobbySelect();
+});
+
 socket.on("lobby:created", (d) => { if (d.ok) { showStatus(""); enterLobby(d.room); } });
 socket.on("lobby:join", (d) => {
   if (!d.ok) { showStatus(d.reason); return; }
@@ -1193,7 +1289,11 @@ socket.on("game:started", (d) => {
   if (!d.ok) return;
   state.inGame = true;
   state.map = d.map;
+  state.mapId = d.mapId;
   state.weapons = d.weapons || {};
+  state.characters = d.characters || {};
+  state.myChar = d.me?.charId || "vanguard";
+  state.speedMult = 1;
   state.scores = { red: 0, blue: 0 };
   state.round = d.state.round;
   state.phase = "buy";
@@ -1236,7 +1336,10 @@ socket.on("game:started", (d) => {
 socket.on("game:sync", (d) => {
   if (state.inGame) return;
   state.map = d.map;
+  state.mapId = d.mapId;
   state.weapons = d.weapons || {};
+  state.characters = d.characters || {};
+  state.speedMult = 1;
   state.inGame = true;
   state.alive = true;
   state.ads = false;
@@ -1265,6 +1368,9 @@ socket.on("game:state", (snap) => {
   const mine = snap.players.find(p => p.id === state.myId) || null;
   if (mine) {
     state.myHP = mine.hp;
+    state.maxHp = mine.maxHp || 150;
+    state.speedMult = mine.speedMult || 1;
+    state.myChar = mine.charId || state.myChar;
     state.myAmmo = mine.ammo;
     if (mine.weapon && mine.weapon !== state.myWeapon) {
       state.myWeapon = mine.weapon;
@@ -1394,30 +1500,38 @@ socket.on("game:buy", (d) => {
 socket.on("game:fx", (fx) => {
   // 내가 쏜 총알은 총구 앞에서부터 트레이서 시작 (시야 확보 — 특히 스나이퍼)
   let ox = fx.ox, oy = fx.oy, oz = fx.oz;
-  if (fx.shooter === state.myId) {
+  const isMine = fx.shooter === state.myId;
+  if (isMine) {
     const cast = 0.42;
     const len = Math.hypot(fx.dx, fx.dy, fx.dz) || 1;
     ox += (fx.dx / len) * cast;
     oy += (fx.dy / len) * cast;
     oz += (fx.dz / len) * cast;
   }
-  const mat = new THREE.LineBasicMaterial({ color: fx.hit ? 0xffe066 : 0xcfd8e6, transparent: true, opacity: 0.9 });
+  // 밝고 두꺼운 트레이서 (Additive) — 총알이 보여야 발사 체감이 난다
+  const color = fx.hit ? 0xffe066 : (fx.weapon === "sr" ? 0x66cfff : 0xd8e6ff);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 1, blending: THREE.AdditiveBlending });
   const geo = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(ox, oy, oz),
     new THREE.Vector3(fx.hitX, fx.hitY, fx.hitZ),
   ]);
   const line = new THREE.Line(geo, mat);
   scene.add(line);
-  // 스나이퍼는 더 길게/밝게 표시
-  const life = fx.weapon === "sr" ? 0.16 : 0.09;
+  // 로컬 샷은 더 길게 표시 (탄속 체감)
+  const life = fx.weapon === "sr" ? 0.2 : (isMine ? 0.12 : 0.09);
   state.tracers.push({ line, born: performance.now(), life });
-  if (fx.shooter === state.myId && fx.snd !== false) Sfx.shot(fx.weapon);
-  if (fx.shooter === state.myId && fx.hit) showHitMarker();
+
+  // 총구 섬광 (내 총알만) — 발사 순간 화면 중앙 섬광
+  if (isMine && fx.snd !== false) {
+    Sfx.shot(fx.weapon);
+    addMuzzleFlash();
+  }
+  if (isMine && fx.hit) showHitMarker();
   if (fx.hit) {
     const col = fx.weapon === "sr" ? 0xffd75f : 0xffffff;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: col, transparent: true, opacity: 0.9 }));
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: col, transparent: true, opacity: 1, blending: THREE.AdditiveBlending }));
     sprite.position.set(fx.hitX, fx.hitY, fx.hitZ);
-    sprite.scale.set(0.5, 0.5, 1);
+    sprite.scale.set(0.75, 0.75, 1);
     scene.add(sprite);
     state.impacts.push({ sprite, born: performance.now() });
   }
@@ -1526,12 +1640,20 @@ socket.on("disconnect", () => {});
 /* ================= 로비 버튼 ================= */
 
 $("#btn-create").addEventListener("click", () => {
-  socket.emit("lobby:create", { nickname: ($("#nickname").value || "플레이어").trim().slice(0, 16) || "플레이어" });
+  socket.emit("lobby:create", {
+    nickname: ($("#nickname").value || "플레이어").trim().slice(0, 16) || "플레이어",
+    charId: state.myChar,
+    mapId: state.mapId,
+  });
 });
 $("#btn-join").addEventListener("click", () => {
   const code = $("#join-code").value.trim().toUpperCase();
   if (!code) { showStatus("방 코드를 입력하세요."); return; }
-  socket.emit("lobby:join", { roomId: code, nickname: ($("#nickname").value || "플레이어").trim().slice(0, 16) || "플레이어" });
+  socket.emit("lobby:join", {
+    roomId: code,
+    nickname: ($("#nickname").value || "플레이어").trim().slice(0, 16) || "플레이어",
+    charId: state.myChar,
+  });
 });
 $("#btn-start").addEventListener("click", () => socket.emit("lobby:start"));
 $("#btn-back-lobby").addEventListener("click", () => {
@@ -1551,6 +1673,7 @@ function enterLobbyUI() {
   $("#weapon-select").classList.add("hidden");
   $("#hud").classList.add("hidden");
   $("#lobby").classList.remove("hidden");
+  renderLobbySelect();
 }
 
 // 방 코드 URL 지원 (?room=)
@@ -1659,6 +1782,18 @@ function animate(now) {
       const mesh = smokeMeshes.get(sm.id);
       if (mesh) { scene.remove(mesh.mesh); if (mesh.inner) scene.remove(mesh.inner); smokeMeshes.delete(sm.id); }
     }
+  }
+  // 플레이어가 연막 안에 들어가면 시야 차폐 (연막 체감)
+  {
+    let inSmoke = 0;
+    for (const sm of state.smokes) {
+      const age = smNowS - sm.born;
+      if (age > sm.dur) continue;
+      const d = Math.hypot(state.x - sm.x, state.z - sm.z);
+      if (d < sm.r) inSmoke = Math.max(inSmoke, 1 - d / sm.r);
+    }
+    const sb = $("#smoke-blind");
+    if (sb) sb.style.opacity = String(Math.min(1, inSmoke));
   }
   for (const [id, m] of smokeMeshes) {
     const sm = state.smokes.find(s => s.id === id);

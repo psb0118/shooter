@@ -18,6 +18,25 @@
       <div class="lobby-row">
         <input id="nickname" maxlength="16" placeholder="닉네임" autocomplete="off" />
       </div>
+
+      <!-- 캐릭터 선택 (정보 카드) -->
+      <div class="lobby-section">
+        <div class="lobby-sec-title">캐릭터 선택 <em>체력·속도·연막·궁극기가 다릅니다</em></div>
+        <div id="char-select" class="pick-grid"></div>
+      </div>
+
+      <!-- 맵 선택 (방장) -->
+      <div class="lobby-section">
+        <div class="lobby-sec-title">맵 선택</div>
+        <div id="map-select" class="pick-grid"></div>
+      </div>
+
+      <!-- 무기 정보 -->
+      <div class="lobby-section">
+        <div class="lobby-sec-title">무기 정보 <em>정확한 능력치</em></div>
+        <div id="weapon-info" class="ws-grid-mini"></div>
+      </div>
+
       <div class="lobby-actions">
         <button id="btn-create" class="btn primary">방 만들기</button>
       </div>
@@ -156,6 +175,9 @@
       <div class="scope-line sl-v"></div>
       <div class="scope-dot"></div>
     </div>
+
+    <div id="muzzle-flash" class="hidden"></div>
+    <div id="smoke-blind" class="hidden"></div>
 
     <div id="killfeed"></div>
 

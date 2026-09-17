@@ -53,30 +53,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.equal(created.room.host, a.id, "A가 방장");
     ok(`방 생성 (${roomId})`);
 
-    /* B 참여 */
-    b.emit("lobby:join", { roomId, nickname: "베타" });
-    const joined = await once(b, "lobby:join");
-    assert(joined.ok, "lobby:join ok");
-    await once(b, "lobby:state");
-    ok("참여");
-
-    /* A 시작 → 5v5 봇 보충 */
+    /* A 시작 (혼자) → 5v5 봇 보충 */
     const startedA = once(a, "game:started");
-    const startedB = once(b, "game:started");
     a.emit("lobby:start");
     const gs = await startedA;
-    await startedB;
     assert(gs.ok, "game:started ok");
-    assert(gs.map && gs.weapons && gs.state.players.length === 10, `맵/무기/스냅샷 (인간2+봇8=${gs.state.players.length})`);
+    assert(gs.map && gs.weapons && gs.state.players.length === 10, `맵/무기/스냅샷 (1인+봇9=${gs.state.players.length})`);
     assert.equal(gs.state.phase, "buy", "첫 라운드 buy");
     assert.equal(gs.state.round, 1, "라운드 1");
     const bots = gs.state.players.filter(p => p.id.startsWith("bot-"));
-    assert.equal(bots.length, 8, "봇 8명");
+    assert.equal(bots.length, 9, "봇 9명");
     assert.equal(gs.state.players.filter(p => p.team === "red").length, 5, "레드 5명");
     assert.equal(gs.state.players.filter(p => p.team === "blue").length, 5, "블루 5명");
     const carrier = gs.state.players.find(p => p.hasSpike);
     assert(carrier && carrier.team === "red", "공격(레드) 캐리어 보유");
-    ok("5v5 시작 & 캐리어 배정");
+    ok("혼자 시작 → 5v5 & 캐리어 배정");
 
     /* 구매 단계: 자금 부족 AR 구매 거부, 권총 재구매 허용 */
     const moneyStart = (await once(a, "game:state")).players.find(p => p.id === a.id).money;
@@ -100,8 +91,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       armed = snap.players.filter(p => p.id.startsWith("bot-") && p.weapon !== "pistol").length;
       if (armed > 0) break;
     }
-    assert(armed >= 4, `공격 봇이 구매 후 AR/SMG 장비 (장비=${armed})`);
-    ok(`봇 구매 (전투 참전 장비 ${armed}/4)`);
+    assert(armed >= 4, `봇들이 구매 후 AR/SMG 장비 (장비=${armed})`);
+    ok(`봇 구매 (전투 참전 장비 ${armed}/9)`);
 
     const bot = (await once(a, "game:state")).players.find(p => p.id.startsWith("bot-"));
 
@@ -117,10 +108,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert(botMoved, "봇 AI 이동");
     ok("봇 AI 전투 이동");
 
-    /* 라운드 종료 이벤트 수신 (봇들이 조만간 라운드 판정 — 최대 90초) */
-    const re = await once(a, "round:end", 90000);
+    /* 라운드 종료 이벤트 수신 (구매 12s + 전투 최대 100s → 최대 150초) */
+    const re = await once(a, "round:end", 150000);
     assert(re.winner === "red" || re.winner === "blue", `round:end 수신 (winner=${re.winner})`);
     ok(`round:end 수신 (winner=${re.winner}, reason=${re.reason})`);
+
+    /* 인간 2명째 조인 → 봇 제거 정책 */
+    b.emit("lobby:join", { roomId, nickname: "베타" });
+    const joined = await once(b, "lobby:join");
+    assert(joined.ok, "lobby:join ok");
+    await once(b, "lobby:state");
+    let noBotSnap = null;
+    for (let i = 0; i < 6; i++) {
+      noBotSnap = await once(a, "game:state", 15000);
+      if (noBotSnap.players.filter(p => p.id.startsWith("bot-")).length === 0) break;
+      await sleep(400);
+    }
+    const aliveBots = noBotSnap ? noBotSnap.players.filter(p => p.id.startsWith("bot-")).length : -1;
+    assert.equal(aliveBots, 0, `인간 2명째 조인 → 봇 제거 (봇=${aliveBots})`);
+    assert.equal(noBotSnap.players.length, 2, `봇 제거 후 인간 2명만 (n=${noBotSnap.players.length})`);
+    ok("인간 2명째 조인 → AI 제거 (2명만 남음)");
 
     b.emit("lobby:leave");
     a.emit("lobby:leave");

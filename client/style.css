@@ -14,7 +14,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 
 /* ==================== 로비 ==================== */
 .lobby-box {
-  width: 380px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
+  width: 560px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
   background: #141926; border: 1px solid #2a3242; border-radius: 14px;
   padding: 28px 26px; box-shadow: 0 12px 40px rgba(0,0,0,.5);
 }
@@ -54,6 +54,37 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 .player-item .pdot.blue { background: #4c8bee; box-shadow: 0 0 6px #4c8bee; }
 .player-item .pname { flex: 1; }
 .player-item .phost { color: #ffd75f; font-size: 11px; }
+
+/* -------- 로비 선택 UI (캐릭터/맵/무기) -------- */
+.lobby-section { margin: 14px 0 8px; }
+.lobby-sec-title { font-size: 13px; font-weight: 700; color: #98a3b5; margin-bottom: 8px; }
+.lobby-sec-title em { font-weight: 400; font-style: normal; color: #5b6474; font-size: 11px; margin-left: 6px; }
+.pick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pick-card {
+  display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 10px 12px;
+  background: #0d1119; border: 1px solid #2a3242; border-radius: 10px; cursor: pointer;
+  transition: border-color .12s, background .12s, transform .08s; color: #e8ecf4; font-family: inherit;
+}
+.pick-card:hover { border-color: #4a7cff; background: #131a29; transform: translateY(-1px); }
+.pick-card.sel { border-color: #ffd75f; background: #1b2233; }
+.pick-card .pk-top { display: flex; align-items: center; gap: 7px; }
+.pick-card .pk-emoji { font-size: 20px; }
+.pick-card .pk-name { font-size: 15px; font-weight: 800; }
+.pick-card .pk-tags { font-size: 11px; color: #7c8698; }
+.pick-card .pk-tags b { color: #ffd75f; }
+.pick-card .pk-desc { font-size: 11px; color: #98a3b5; line-height: 1.4; }
+.pick-card .pk-skill { font-size: 11px; color: #5fd1ff; line-height: 1.35; }
+.pick-card .pk-ult { font-size: 11px; color: #ffb347; line-height: 1.35; }
+.pick-card .pk-note { font-size: 10px; color: #5b6474; }
+.ws-grid-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ws-mini {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
+  background: #0d1119; border: 1px solid #222a3a; border-radius: 8px;
+  font-size: 11px; color: #98a3b5; line-height: 1.4;
+}
+.ws-mini .wm-name { font-size: 13px; font-weight: 800; color: #e8ecf4; letter-spacing: 1px; }
+.ws-mini .wm-name em { font-style: normal; font-size: 10px; color: #ffd75f; font-weight: 700; margin-left: 6px; }
+.ws-mini b { color: #e8ecf4; }
 
 /* ==================== HUD ==================== */
 #hud { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
@@ -164,18 +195,18 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 #scope-overlay {
   position: absolute; inset: 0; pointer-events: none; z-index: 12;
   background:
-    radial-gradient(ellipse at center, rgba(0,0,0,0) 26%, rgba(0,0,0,.85) 72%, rgba(0,0,0,.95) 100%),
-    linear-gradient(rgba(0,0,0,.55), rgba(0,0,0,.55));
+    radial-gradient(ellipse at center, rgba(0,0,0,0) 30%, rgba(0,0,0,.55) 70%, rgba(0,0,0,.85) 100%),
+    linear-gradient(rgba(0,0,0,.25), rgba(0,0,0,.25));
 }
 .scope-ring {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 46vh; height: 46vh; max-width: 70vw; max-height: 70vw;
-  border: 2px solid rgba(0,0,0,.9); border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(255,255,255,.25), 0 0 0 2px rgba(0,0,0,.6), 0 0 14px rgba(255,255,255,.12);
+  border: 3px solid rgba(20,20,20,.85); border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.45), 0 0 0 2px rgba(0,0,0,.5), 0 0 18px rgba(255,255,255,.2);
 }
 .scope-line {
-  position: absolute; left: 50%; top: 50%; background: rgba(0,0,0,.9);
-  box-shadow: 0 0 0 1px rgba(255,255,255,.25);
+  position: absolute; left: 50%; top: 50%; background: rgba(15,15,15,.8);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.4);
 }
 .scope-line.sl-h { width: 10vw; max-width: 160px; height: 3px; transform: translate(-50%, -50%); }
 .scope-line.sl-v { height: 10vh; max-height: 160px; width: 3px; transform: translate(-50%, -50%); }
@@ -188,6 +219,25 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 #hitmarker {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   font-size: 28px; color: #ff4d4d; font-weight: 700; text-shadow: 0 0 8px #ff0000aa;
+}
+
+/* 총구 섬광 — 발사 순간 '탕!' 느낌 */
+#muzzle-flash {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 180px; height: 180px; pointer-events: none; z-index: 9;
+  background: radial-gradient(circle, rgba(255,220,120,.95) 0%, rgba(255,150,40,.55) 34%, rgba(255,80,20,0) 70%);
+  border-radius: 50%;
+}
+#muzzle-flash.flash {
+  animation: muzzlean 0.09s ease-out;
+}
+@keyframes muzzlean { 0% { opacity: 1; transform: translate(-50%,-50%) scale(.9); } 100% { opacity: 0; transform: translate(-50%,-50%) scale(1.9); } }
+
+/* 연막 안에 들어가면 시야 차폐 (연막 성능 체감) */
+#smoke-blind {
+  position: absolute; inset: 0; pointer-events: none; z-index: 11;
+  background: radial-gradient(ellipse at center, rgba(120,135,155,.55) 0%, rgba(80,92,112,.72) 60%, rgba(50,60,78,.82) 100%);
+  opacity: 0; transition: opacity .25s;
 }
 #damage-vignette {
   position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(255,0,0,0) 40%, rgba(150,0,0,.35) 100%);

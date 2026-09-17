@@ -9,12 +9,12 @@ const path = require("path");
 const http = require("http");
 const express = require("express");
 const { Server } = require("socket.io");
-const { WEAPONS, MAP, TICK_RATE, STATE_RATE, createMatch } = require("./game.js");
+const { WEAPONS, MAPS, CHARACTERS, TICK_RATE, STATE_RATE, createMatch } = require("./game.js");
 
 const ROOT_DIR = path.join(__dirname, "..");
 const CLIENT_DIR = path.join(ROOT_DIR, "client");
 const PORT = process.env.PORT || 3000;
-const TARGET_PER_TEAM = 5; // 봇으로 팀별 5vs5 보충
+const TARGET_PER_TEAM = 5; // 봇으로 팀별 5vs5 보충 (인간이 없을 때만)
 const BOT_NAMES = ["로봇", "알레망", "레이", "닉스", "토르", "바이퍼", "스카", "버트", "헌터", "제트"];
 let botSeq = 0;
 
@@ -64,12 +64,14 @@ function roomState(room) {
     roomId: room.id,
     host: room.host,
     status: room.status,
+    mapId: room.mapId || "center",
     players: room.players.map(p => ({
       socketId: p.socketId,
       nickname: p.nickname,
       team: p.team,
       connected: p.connected,
       isBot: !!p.isBot,
+      charId: p.charId || "vanguard",
     })),
   };
 }
@@ -81,16 +83,29 @@ function broadcastLobby(room) {
 
 /* =========================================================
    봇 — 팀별 부족 인원을 채워서 혼자서도 바로 플레이 가능
+   단, "방장 외 인간 플레이어가 1명 이상 있으면 AI 제거" 정책.
+   → 인간이 2명 미만(순수 솔로)일 때만 봇 보충.
 ========================================================= */
 
+function humanCount(room) {
+  return room.players.filter(p => p.connected && !p.isBot).length;
+}
+
 function fillBots(room) {
+  // 방장 제외 참여한 인간이 1명 이상이면 AI 미보충
+  if (humanCount(room) >= 2) {
+    clearBots(room);
+    return;
+  }
+  clearBots(room);
   for (const team of ["red", "blue"]) {
     let count = room.players.filter(p => p.team === team && p.connected).length;
     while (count < TARGET_PER_TEAM) {
       const id = "bot-" + (++botSeq);
       const nick = BOT_NAMES[(botSeq - 1) % BOT_NAMES.length] + botSeq;
-      room.players.push({ socketId: id, nickname: nick, team, connected: true, isBot: true });
-      room.match.addPlayer({ id, nickname: nick, team });
+      const charId = (["vanguard", "rush", "guard", "venom"])[botSeq % 4];
+      room.players.push({ socketId: id, nickname: nick, team, connected: true, isBot: true, charId });
+      room.match.addPlayer({ id, nickname: nick, team, charId });
       count++;
     }
   }
@@ -104,9 +119,10 @@ function clearBots(room) {
   room.players = room.players.filter(p => !p.isBot);
 }
 
-function inSiteZone(p) {
+function inSiteZone(p, map) {
+  const mapData = map || MAPS.center;
   for (const key of ["A", "B"]) {
-    const s = MAP.sites[key];
+    const s = mapData.sites[key];
     if (Math.abs(p.x - s.cx) < s.w / 2 && Math.abs(p.z - s.cz) < s.d / 2) return key;
   }
   return null;
@@ -123,6 +139,12 @@ function resetBotRound(me, round) {
     nudgeT: 0,
     lastX: me.x,
     lastZ: me.z,
+    // AI 난이도: 반응 시간 + 조준 오차 (봇별 랜덤 0.6~1.0)
+    skill: 0.6 + Math.random() * 0.4,
+    reactUntil: 0,
+    holdAim: null,
+    burstLeft: 0,
+    nextShotT: 0,
   };
   me._botRound = round;
 }
@@ -136,14 +158,17 @@ function stepBot(room, botId) {
   const bot = me._bot;
   if (!bot) return;
 
-  /* 구매 단계: 자동 구매 후 대기 */
+  const now = m._now();
+
+  /* 구매 단계: 이동 금지 · 자동 구매 후 대기 */
   if (m.phase === "buy") {
     m.input(botId, { keys: { w: false, a: false, s: false, d: false, shift: false, space: false }, firing: false, ads: false });
     if (!bot.bought) {
       bot.bought = true;
       // AI 경제 보정: 최소한 SMG 살 돈은 있게 (발로란트 감성 유지 + 난이도)
       if (me.money < 1600) me.money = 1600;
-      if (!m.buy(botId, "ar")) m.buy(botId, "smg");
+      if (!m.buy(botId, "ar") && me.money >= 2900) m.buy(botId, "ar");
+      if (me.weapon === "pistol") m.buy(botId, "smg");
     }
     if (bot.interacting) { m.interact(botId, { action: "stop" }); bot.interacting = false; }
     return;
@@ -155,14 +180,21 @@ function stepBot(room, botId) {
     return;
   }
 
-  /* 목표 선택 — 가장 가까운 살아있는 적 */
+  /* 목표 선택 — 시야(LOS)가 있어야 인식 (벽 뒤 위치 추적 금지) */
+  const map = m.map || MAPS.center;
   const enemies = m.getPlayers().filter(t => t.id !== botId && t.alive && t.team !== me.team);
-  let target = null, bestD = Infinity;
+  let target = null, los = false, bestD = Infinity;
   for (const t of enemies) {
+    if (!m.hasLos(botId, t.id)) continue;   // 벽/연막 뒤 적은 '보지 못함'
     const d = Math.hypot(t.x - me.x, t.z - me.z);
-    if (d < bestD) { bestD = d; target = t; }
+    if (d > 42) continue;                   // 유효 교전 거리 밖 — 진격 우선 (전맵 저격 방지)
+    if (d < bestD) { bestD = d; target = t; los = true; }
   }
-  const los = target ? m.hasLos(botId, target.id) : false;
+  // 최근에 본 적 위치 메모리 (짧은 시간만, 정확도 낮춤)
+  let ghost = null;
+  if (!target && bot.memory && now - bot.memory.t < 3.0) ghost = bot.memory;
+  if (target) bot.memory = { x: target.x, z: target.z, t: now };
+  else if (bot.memory && now - bot.memory.t >= 3.0) bot.memory = null;
 
   const role = m.roleOf(me.team);
   const spike = m.spike;
@@ -171,8 +203,8 @@ function stepBot(room, botId) {
   let hold = false;
 
   if (role === "attack") {
-    const site = MAP.sites[bot.site];
-    const wp = MAP.waypoints[bot.site];
+    const site = map.sites[bot.site];
+    const wp = map.waypoints[bot.site];
 
     /* 드랍 스파이크가 있으면 먼저 픽업 */
     if (!me.hasSpike && spike.dropped) {
@@ -187,7 +219,7 @@ function stepBot(room, botId) {
         moveTo = wp[Math.min(bot.wpIdx, wp.length - 1)];
       } else {
         moveTo = { x: site.cx, z: site.cz };
-        if (me.hasSpike && !spike.planted && inSiteZone(me)) {
+        if (me.hasSpike && !spike.planted && inSiteZone(me, map)) {
           moveTo = null;
           hold = false;
           wantInteract = { type: "plant", action: "start" };
@@ -206,7 +238,7 @@ function stepBot(room, botId) {
       }
     } else {
       /* 사이트 고정 방어 (약간의 진영 변위) */
-      const site = MAP.sites[bot.site];
+      const site = map.sites[bot.site];
       const anchor = { x: site.cx + (me.x < 0 ? -5 : 5), z: site.cz - 8 };
       if (Math.hypot(anchor.x - me.x, anchor.z - me.z) < 3) {
         moveTo = null; hold = true;
@@ -221,31 +253,48 @@ function stepBot(room, botId) {
   let pitch = me.pitch;
   let firing = false;
 
-  if (target && los) {
-    /* 조준 (거리 기반 확산) */
-    const aimErr = Math.min(0.10, 0.006 + bestD * 0.0012);
-    const jitter = () => (Math.random() - 0.5) * 2 * aimErr;
-    yaw = Math.atan2(target.x - me.x, target.z - me.z) + jitter() * 0.7;
-    pitch = Math.atan2((target.y + 1.0) - 1.6, bestD) + jitter() * 0.6;
-    firing = bestD < 85 && Math.random() < 0.9;
+  const reactDelay = 0.35 + (1 - bot.skill) * 0.45; // 숙련도 낮을수록 늦은 반응
 
-    if (bestD < 22) {
-      if (Math.random() < 0.55) keys.a = true; else keys.d = true;
-    } else if (moveTo && bestD > 30) {
-      const navYaw = Math.atan2(moveTo.x - me.x, moveTo.z - me.z);
-      yaw = navYaw;
-      keys.w = true;
+  if (target && los) {
+    // 반응 시간 경과 전에는 조준도 못함 (처음 보자마자 즉시 조준 불가)
+    if (now >= bot.reactUntil) {
+      const aimErr = Math.min(0.22, 0.02 + bestD * 0.0022 + (1 - bot.skill) * 0.03);
+      const jitter = () => (Math.random() - 0.5) * 2 * aimErr;
+      yaw = Math.atan2(target.x - me.x, target.z - me.z) + jitter() * 0.8;
+      pitch = Math.atan2((target.y + 1.0) - 1.6, bestD) + jitter() * 0.7;
+      // 사격: 연사 시 정확도 급감 + 반응 딜레이 후 점사
+      const canShoot = now >= bot.nextShotT && bestD < 42 && Math.random() < 0.45 * bot.skill;
+      if (canShoot) {
+        firing = true;
+        bot.burstLeft = 2 + Math.floor(Math.random() * 2);
+        bot.nextShotT = now + (0.9 + Math.random() * 0.6);
+      } else if (bot.burstLeft > 0) {
+        firing = true;
+        bot.burstLeft--;
+      }
+      bot.holdAim = { yaw, pitch };
     }
+    if (bestD < 18) {
+      if (Math.random() < 0.5) keys.a = true; else keys.d = true;
+    }
+  } else if (ghost && now >= bot.reactUntil) {
+    // 기억 속 적 방향으로 천천히 조준 (정확도 낮음 — 메모리라서)
+    yaw = Math.atan2(ghost.x - me.x, ghost.z - me.z);
+    pitch = 0;
   } else if (moveTo) {
     yaw = Math.atan2(moveTo.x - me.x, moveTo.z - me.z);
     pitch = 0;
     keys.w = true;
-    if (Math.random() < 0.12) keys.shift = true;
+    if (Math.random() < 0.1) keys.shift = true;
   } else if (hold) {
-    /* 시야 360도 순찰 */
+    /* 시야 360도 순찰 — 반응 준비 */
+    if (now < bot.reactUntil) bot.reactUntil = now;
     bot.nudgeT = (bot.nudgeT || 0) + 1;
     if (bot.nudgeT > 90) { yaw = me.yaw + 2.4; bot.nudgeT = 0; }
   }
+
+  // 적을 처음 마주친 순간 반응 딜레이 시작
+  if (target && los && now >= bot.reactUntil) bot.reactUntil = now + reactDelay + Math.random() * 0.3;
 
   /* 전투 중에는 설치/해체를 일시 중단 */
   if (wantInteract && target && los && bestD < 14) wantInteract = null;
@@ -292,6 +341,8 @@ function leaveRoom(socket, room) {
     ROOMS.delete(room.id);
   } else {
     broadcastLobby(room);
+    // 혼자 남으면 봇 재보충 (대기 상태에서만 — 진행 중 경기는 그대로 두어 팀 성립 유지)
+    if (room.status === "lobby" && humanCount(room) < 2) fillBots(room);
   }
 }
 
@@ -412,12 +463,19 @@ io.on("connection", (socket) => {
   socket.data.roomId = null;
   socket.data.role = null;
 
-  socket.emit("server:ready", { ok: true, tickRate: TICK_RATE, stateRate: STATE_RATE });
+  socket.emit("server:ready", {
+    ok: true, tickRate: TICK_RATE, stateRate: STATE_RATE,
+    characters: CHARACTERS,
+    weapons: WEAPONS,
+    maps: Object.fromEntries(Object.entries(MAPS).map(([id, m]) => [id, { id: m.id, name: m.name, desc: m.desc }])),
+  });
 
   /* ---------- 로비 ---------- */
 
   socket.on("lobby:create", (data) => {
     const nickname = String(data?.nickname || "플레이어").trim().slice(0, 16) || "플레이어";
+    const charId = ["vanguard", "rush", "guard", "venom"].includes(data?.charId) ? data.charId : "vanguard";
+    const mapId = MAPS[data?.mapId] ? data.mapId : "center";
     if (socket.data.roomId) {
       const old = ROOMS.get(socket.data.roomId);
       leaveRoom(socket, old);
@@ -429,7 +487,8 @@ io.on("connection", (socket) => {
       host: socket.id,
       status: "lobby",
       players: [],
-      match: createMatch(roomId),
+      mapId,
+      match: createMatch(roomId, { mapId }),
       tickCount: 0,
     };
     ROOMS.set(roomId, room);
@@ -437,16 +496,17 @@ io.on("connection", (socket) => {
     socket.join(roomId);
     socket.data.roomId = roomId;
     socket.data.role = "host";
-    room.players.push({ socketId: socket.id, nickname, team: "red", connected: true });
-    room.match.addPlayer({ id: socket.id, nickname, team: "red" });
+    room.players.push({ socketId: socket.id, nickname, team: "red", connected: true, charId });
+    room.match.addPlayer({ id: socket.id, nickname, team: "red", charId });
 
     socket.emit("lobby:created", { ok: true, roomId, room: roomState(room) });
-    console.log(`[ROOM CREATE] ${roomId} host=${nickname}`);
+    console.log(`[ROOM CREATE] ${roomId} host=${nickname} map=${mapId} char=${charId}`);
   });
 
   socket.on("lobby:join", (data) => {
     const roomId = String(data?.roomId || "").trim().toUpperCase();
     const nickname = String(data?.nickname || "플레이어").trim().slice(0, 16) || "플레이어";
+    const charId = ["vanguard", "rush", "guard", "venom"].includes(data?.charId) ? data.charId : "vanguard";
     const room = ROOMS.get(roomId);
     if (!room) {
       socket.emit("lobby:join", { ok: false, reason: "방을 찾을 수 없습니다." });
@@ -458,17 +518,18 @@ io.on("connection", (socket) => {
     socket.join(roomId);
     socket.data.roomId = roomId;
     socket.data.role = "member";
-    room.players.push({ socketId: socket.id, nickname, team: teamFor(room), connected: true });
-    room.match.addPlayer({ id: socket.id, nickname, team: room.players[room.players.length - 1].team });
+    room.players.push({ socketId: socket.id, nickname, team: teamFor(room), connected: true, charId });
+    room.match.addPlayer({ id: socket.id, nickname, team: room.players[room.players.length - 1].team, charId });
 
     socket.emit("lobby:join", { ok: true, roomId, room: roomState(room) });
     broadcastLobby(room);
 
     /* 게임이 진행 중이면 바로 참전 — 맵/무기 설정 동기화 */
     if (room.status === "playing") {
-      socket.emit("game:sync", { map: MAP, weapons: WEAPONS });
+      if (humanCount(room) >= 2) clearBots(room);
+      socket.emit("game:sync", { mapId: room.mapId, map: room.match.map, weapons: WEAPONS, characters: CHARACTERS });
     }
-    console.log(`[ROOM JOIN] ${roomId} <- ${nickname}`);
+    console.log(`[ROOM JOIN] ${roomId} <- ${nickname} char=${charId}`);
   });
 
   socket.on("lobby:leave", () => {
@@ -495,11 +556,14 @@ io.on("connection", (socket) => {
 
     io.to(room.id).emit("game:started", {
       ok: true,
-      map: MAP,
+      mapId: room.mapId,
+      map: room.match.map,
       weapons: WEAPONS,
+      characters: CHARACTERS,
       me: {
         socketId: socket.id,
         team: room.players.find(p => p.socketId === socket.id)?.team,
+        charId: room.players.find(p => p.socketId === socket.id)?.charId || "vanguard",
       },
       state: room.match.snapshot(),
     });

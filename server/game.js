@@ -63,108 +63,216 @@ function rnd(n) { return Math.floor(Math.random() * n); }
 /* =========================================================
    무기 정의
    body/head/legs = 부위별 데미지, price = 구매 가격([0]권총 무료)
+   moveSpread = 이동 중 추가 확산(0~1), adsSpread = 조준 배율(0.35)
 ========================================================= */
 
 const WEAPONS = {
-  pistol: { id: "pistol", name: "PISTOL",   price: 0,    body: 26, head: 104, legs: 22, cadence: 0.28,  spread: 0.02,  magSize: 12, reloadTime: 1.5, auto: false },
-  smg:    { id: "smg",    name: "SMG",      price: 1600, body: 22, head: 88,  legs: 19, cadence: 0.085, spread: 0.024, magSize: 30, reloadTime: 1.7, auto: true,  falloff: { from: 20, to: 40, min: 0.7 } },
-  ar:     { id: "ar",     name: "AR",       price: 2900, body: 30, head: 120, legs: 26, cadence: 0.115, spread: 0.007, magSize: 30, reloadTime: 2.0, auto: true,  falloff: { from: 30, to: 55, min: 0.8 } },
-  sr:     { id: "sr",     name: "SNIPER",   price: 4700, body: 99, head: 150, legs: 85, cadence: 1.1,   spread: 0.0,   magSize: 5,  reloadTime: 2.6, auto: false },
-  sg:     { id: "sg",     name: "SHOTGUN",  price: 900,  body: 17, head: 68,  legs: 15, cadence: 0.9,   spread: 0.1,   magSize: 6,  reloadTime: 2.2, auto: false, pellets: 8, range: 40 },
+  pistol: { id: "pistol", name: "PISTOL",   price: 0,    body: 26, head: 104, legs: 22, cadence: 0.28,  spread: 0.015, magSize: 12, reloadTime: 1.5, auto: false, moveSpread: 1.4, icon: "🔫", desc: "기본 지급 권총. 무료로 매 라운드 재지급." },
+  smg:    { id: "smg",    name: "SMG",      price: 1600, body: 22, head: 88,  legs: 19, cadence: 0.085, spread: 0.024, magSize: 30, reloadTime: 1.7, auto: true,  moveSpread: 1.5, adsSpread: 0.4, falloff: { from: 20, to: 40, min: 0.7 }, icon: "💨", desc: "근거리 연사형. 빠른 사격속도로 근접 압박." },
+  ar:     { id: "ar",     name: "AR",       price: 2900, body: 30, head: 120, legs: 26, cadence: 0.115, spread: 0.005, magSize: 30, reloadTime: 2.0, auto: true,  moveSpread: 1.25, adsSpread: 0.18, falloff: { from: 30, to: 55, min: 0.8 }, icon: "🎯", desc: "주력 중장거리 소총. 조준(우클릭) 시 정확도 급상승." },
+  sr:     { id: "sr",     name: "SNIPER",   price: 4700, body: 99, head: 150, legs: 85, cadence: 1.1,   spread: 0.0,   magSize: 5,  reloadTime: 2.6, auto: false, moveSpread: 0.5, icon: "🔭", desc: "고위력 저격총. 우클릭으로 스코프, 헤드샷 원킬." },
+  sg:     { id: "sg",     name: "SHOTGUN",  price: 900,  body: 17, head: 68,  legs: 15, cadence: 0.9,   spread: 0.09,  magSize: 6,  reloadTime: 2.2, auto: false, moveSpread: 1.8, pellets: 8, range: 40, icon: "💥", desc: "근접 샷건. 한 발에 8발의 펠릿, 가까울수록 파괴적." },
+};
+
+/* =========================================================
+   캐릭터 정의 — 고유 스탯(체력/속도), 스킬(연막), 궁(낙뢰)
+   hp/speed = 배율, smokeCd = 연막 쿨다운(초)
+   ultRadius/ultDmg = 궁 범위/데미지
+========================================================= */
+
+const CHARACTERS = {
+  vanguard: {
+    id: "vanguard", name: "뱅가드", emoji: "🃏",
+    desc: "균형 잡힌 올라운더. 어떤 상황에서도 무난하게 활약합니다.",
+    hp: 1.0, speed: 1.0,
+    smokeCd: 22,
+    ultRadius: ULT_RADIUS, ultDmg: ULT_DMG,
+    skillDesc: "연막 [Q] — 조준점 방향 최대 18m에 시야·사격 차단 연막(4.5m, 10초)을 깝니다. 벽에 닿으면 즉시 터집니다.",
+    ultDesc: "낙뢰 [X] — 조준점 18m 내에 5.5m 반경 번개를 떨어뜨려 적에게 90 대미지. 킬/설치/해체로 궁 게이지 축적.",
+  },
+  rush: {
+    id: "rush", name: "러시", emoji: "💨",
+    desc: "빠른 이동 속도와 짧은 연막 쿨다운. 진격/플랭크에 특화된 공격형.",
+    hp: 0.85, speed: 1.15,
+    smokeCd: 18,
+    ultRadius: 4.5, ultDmg: 110,
+    skillDesc: "연막 [Q] — 뱅가드보다 4초 빠른 18초 쿨다운. 전술 기동에 유리합니다.",
+    ultDesc: "번개 일격 [X] — 좁지만 강렬한 4.5m 반경, 110 대미지.",
+  },
+  guard: {
+    id: "guard", name: "가드", emoji: "🛡️",
+    desc: "높은 체력과 강한 궁극기 범위. 사이트 방어에 특화된 수비형.",
+    hp: 1.3, speed: 0.88,
+    smokeCd: 26,
+    ultRadius: 6.5, ultDmg: 60,
+    skillDesc: "연막 [Q] — 쿨다운 26초. 넓은 범위로 진입로를 막습니다.",
+    ultDesc: "균열 낙뢰 [X] — 넓은 6.5m 반경에 60 대미지. 진입 차단용.",
+  },
+  venom: {
+    id: "venom", name: "베놈", emoji: "☠️",
+    desc: "공·수 균형형. 넓은 궁 범위와 준수한 화력.",
+    hp: 0.95, speed: 1.06,
+    smokeCd: 20,
+    ultRadius: 6.0, ultDmg: 85,
+    skillDesc: "연막 [Q] — 쿨다운 20초.",
+    ultDesc: "맹독 낙뢰 [X] — 6.0m 반경, 85 대미지.",
+  },
 };
 
 /* =========================================================
    맵 정의 — 104×104, A/B 사이트, 공격(-z) ↔ 수비(+z)
 ========================================================= */
 
-const MAP = {
-  halfSize: 52,
-  wallHeight: 5.5,
-  obstacles: [
-    // 중앙 구조물 (타워 + 남북 블록 — 리듬 있는 배치)
-    { x:  0,  z:  0,  w: 12, d: 12 },
-    { x:  0,  z: 18,  w:  8, d:  8 },
-    { x:  0,  z:-16,  w: 10, d: 10 },
-    // 남쪽 중앙 보조 커버
-    { x:  0,  z:-30,  w:  3, d:  8 },
-    // 동/서 레인 분리 — 길이·위상 비대칭 (인위적 대칭 제거)
-    { x:-18,  z: -2,  w:  3, d: 14 },
-    { x: 18,  z:  6,  w:  3, d: 18 },
-    // 레인 중간 커버 (비대칭 배치)
-    { x:-32,  z:-10,  w:  5, d:  7 },
-    { x: 40,  z:-12,  w:  7, d:  5 },
-    // L자형 진입 커버 (서/동 비대칭)
-    { x:-31,  z: 12,  w:  4, d: 10 },
-    { x:-40,  z: 19,  w: 10, d:  4 },
-    { x: 31,  z: 18,  w:  4, d:  8 },
-    { x: 39,  z: 15,  w:  7, d:  4 },
-    // 사이트 A 방어 커버
-    { x:-31,  z: 28,  w:  6, d:  6 },
-    { x:-17,  z: 27,  w:  6, d:  5 },
-    // 사이트 B 방어 커버
-    { x: 32,  z: 29,  w:  6, d:  5 },
-    { x: 18,  z: 28,  w:  4, d:  6 },
-    // 중앙-사이트 사이 핀치 커버
-    { x:-12,  z: 24,  w:  5, d:  6 },
-    { x: 12,  z: 30,  w:  5, d:  5 },
-    // 공격측 등진 커버 (외곽 벽에 붙임)
-    { x:-38,  z:-34,  w:  4, d: 10 },
-    { x: 38,  z:-28,  w:  5, d:  8 },
-    // 공격 스폰 근처 스나이퍼 포치 (비대칭)
-    { x:-16,  z:-36,  w:  6, d:  4 },
-    { x: 16,  z:-38,  w:  6, d:  4 },
-    // 수비측 배후 커버 (비대칭)
-    { x:-30,  z: 44,  w: 10, d:  4 },
-    { x: 32,  z: 43,  w:  8, d:  4 },
-    // 넓은 플랭크 벽 (좌우 길이 다르게)
-    { x:-44,  z:-12,  w:  4, d: 26 },
-    { x: 44,  z:-20,  w:  4, d: 34 },
-    // 극단 플랭크 근접 커버 (사선 느낌의 스태거)
-    { x:-47,  z:-34,  w:  4, d:  8 },
-    { x:-44,  z:-48,  w:  4, d:  8 },
-    { x: 46,  z:-42,  w:  6, d:  4 },
-    { x: 43,  z:-30,  w:  6, d:  3 },
-  ],
-  spawns: {
-    attack: [
-      { x: -24, z: -44 },
-      { x:  -8, z: -44 },
-      { x:   0, z: -44 },
-      { x:   8, z: -44 },
-      { x:  24, z: -44 },
+const MAPS = {
+  center: {
+    id: "center",
+    name: "센터",
+    desc: "균형 잡힌 중앙 구조와 넓은 플랭크. 올라운더 지향.",
+    halfSize: 52,
+    wallHeight: 5.5,
+    obstacles: [
+      // 중앙 구조물 (타워 + 남북 블록 — 리듬 있는 배치)
+      { x:  0,  z:  0,  w: 12, d: 12 },
+      { x:  0,  z: 18,  w:  8, d:  8 },
+      { x:  0,  z:-16,  w: 10, d: 10 },
+      // 남쪽 중앙 보조 커버
+      { x:  0,  z:-30,  w:  3, d:  8 },
+      // 동/서 레인 분리 — 길이·위상 비대칭 (인위적 대칭 제거)
+      { x:-18,  z: -2,  w:  3, d: 14 },
+      { x: 18,  z:  6,  w:  3, d: 18 },
+      // 레인 중간 커버 (비대칭 배치)
+      { x:-32,  z:-10,  w:  5, d:  7 },
+      { x: 40,  z:-12,  w:  7, d:  5 },
+      // L자형 진입 커버 (서/동 비대칭)
+      { x:-31,  z: 12,  w:  4, d: 10 },
+      { x:-40,  z: 19,  w: 10, d:  4 },
+      { x: 31,  z: 18,  w:  4, d:  8 },
+      { x: 39,  z: 15,  w:  7, d:  4 },
+      // 사이트 A 방어 커버
+      { x:-31,  z: 28,  w:  6, d:  6 },
+      { x:-17,  z: 27,  w:  6, d:  5 },
+      // 사이트 B 방어 커버
+      { x: 32,  z: 29,  w:  6, d:  5 },
+      { x: 18,  z: 28,  w:  4, d:  6 },
+      // 중앙-사이트 사이 핀치 커버
+      { x:-12,  z: 24,  w:  5, d:  6 },
+      { x: 12,  z: 30,  w:  5, d:  5 },
+      // 공격측 등진 커버 (외곽 벽에 붙임)
+      { x:-38,  z:-34,  w:  4, d: 10 },
+      { x: 38,  z:-28,  w:  5, d:  8 },
+      // 공격 스폰 근처 스나이퍼 포치 (비대칭)
+      { x:-16,  z:-36,  w:  6, d:  4 },
+      { x: 16,  z:-38,  w:  6, d:  4 },
+      // 수비측 배후 커버 (비대칭)
+      { x:-30,  z: 44,  w: 10, d:  4 },
+      { x: 32,  z: 43,  w:  8, d:  4 },
+      // 넓은 플랭크 벽 (좌우 길이 다르게)
+      { x:-44,  z:-12,  w:  4, d: 26 },
+      { x: 44,  z:-20,  w:  4, d: 34 },
+      // 극단 플랭크 근접 커버 (사선 느낌의 스태거)
+      { x:-47,  z:-34,  w:  4, d:  8 },
+      { x:-44,  z:-48,  w:  4, d:  8 },
+      { x: 46,  z:-42,  w:  6, d:  4 },
+      { x: 43,  z:-30,  w:  6, d:  3 },
     ],
-    defend: [
-      { x: -24, z:  44 },
-      { x:  -8, z:  44 },
-      { x:   0, z:  44 },
-      { x:   8, z:  44 },
-      { x:  24, z:  44 },
-    ],
+    spawns: {
+      attack: [
+        { x: -24, z: -44 },
+        { x:  -8, z: -44 },
+        { x:   0, z: -44 },
+        { x:   8, z: -44 },
+        { x:  24, z: -44 },
+      ],
+      defend: [
+        { x: -24, z:  44 },
+        { x:  -8, z:  44 },
+        { x:   0, z:  44 },
+        { x:   8, z:  44 },
+        { x:  24, z:  44 },
+      ],
+    },
+    // 스파이크 설치 구역 (A/B)
+    sites: {
+      A: { cx: -24, cz: 32, w: 6, d: 6 },
+      B: { cx:  24, cz: 32, w: 6, d: 6 },
+    },
+    // 봇 내비게이션용 접근 경로
+    waypoints: {
+      A: [
+        { x: -28, z: -36 }, { x: -28, z: -18 }, { x: -26, z: 6 }, { x: -24, z: 22 }, { x: -24, z: 30 },
+      ],
+      B: [
+        { x: 28, z: -36 }, { x: 28, z: -18 }, { x: 26, z: 6 }, { x: 24, z: 22 }, { x: 24, z: 30 },
+      ],
+    },
   },
-  // 스파이크 설치 구역 (A/B)
-  sites: {
-    A: { cx: -24, cz: 32, w: 6, d: 6 },
-    B: { cx:  24, cz: 32, w: 6, d: 6 },
-  },
-  // 봇 내비게이션용 접근 경로
-  waypoints: {
-    A: [
-      { x: -28, z: -36 }, { x: -28, z: -18 }, { x: -26, z: 6 }, { x: -24, z: 22 }, { x: -24, z: 30 },
+  canyons: {
+    id: "canyons",
+    name: "캐니언",
+    desc: "좁은 레인과 깊숙한 코너. 근접·갱크 중심 맵.",
+    halfSize: 48,
+    wallHeight: 6,
+    obstacles: [
+      { x:  0,  z:   0, w:  8, d:  8 },
+      { x:  0,  z:  16, w:  6, d:  6 },
+      { x:  0,  z:-15,  w:  6, d:  6 },
+      { x:-14,  z:   5, w:  4, d: 16 },
+      { x: 14,  z:   5, w:  4, d: 16 },
+      { x:-26,  z:-10,  w:  5, d:  6 },
+      { x: 26,  z:-10,  w:  5, d:  6 },
+      { x:-26,  z: 20,  w:  5, d:  6 },
+      { x: 26,  z: 20,  w:  5, d:  6 },
+      { x:-36,  z:-26,  w:  4, d: 10 },
+      { x: 36,  z:-26,  w:  4, d: 10 },
+      { x:-30,  z: 32,  w:  6, d:  6 },
+      { x: 30,  z: 32,  w:  6, d:  6 },
+      { x:-14,  z:-30,  w:  8, d:  4 },
+      { x: 14,  z:-30,  w:  8, d:  4 },
+      { x:-40,  z: 10,  w:  4, d: 22 },
+      { x: 40,  z: 10,  w:  4, d: 22 },
+      { x:  0,  z: 30,  w:  4, d:  4 },
     ],
-    B: [
-      { x: 28, z: -36 }, { x: 28, z: -18 }, { x: 26, z: 6 }, { x: 24, z: 22 }, { x: 24, z: 30 },
-    ],
+    spawns: {
+      attack: [
+        { x: -22, z: -40 },
+        { x:  -8, z: -40 },
+        { x:   0, z: -40 },
+        { x:   8, z: -40 },
+        { x:  22, z: -40 },
+      ],
+      defend: [
+        { x: -22, z:  40 },
+        { x:  -8, z:  40 },
+        { x:   0, z:  40 },
+        { x:   8, z:  40 },
+        { x:  22, z:  40 },
+      ],
+    },
+    sites: {
+      A: { cx: -24, cz: 32, w: 6, d: 6 },
+      B: { cx:  24, cz: 32, w: 6, d: 6 },
+    },
+    waypoints: {
+      A: [
+        { x: -24, z: -30 }, { x: -24, z: -10 }, { x: -24, z: 14 }, { x: -24, z: 28 },
+      ],
+      B: [
+        { x: 24, z: -30 }, { x: 24, z: -10 }, { x: 24, z: 14 }, { x: 24, z: 28 },
+      ],
+    },
   },
 };
+
+const MAP = MAPS.center; // 기본 맵 (기존 테스트 호환용)
 
 /* =========================================================
    수학 유틸
 ========================================================= */
 
-function rayBox(ox, oy, oz, dx, dy, dz, box) {
+function rayBox(ox, oy, oz, dx, dy, dz, box, wallHeight) {
   const mnX = box.x - box.w / 2, mxX = box.x + box.w / 2;
   const mnZ = box.z - box.d / 2, mxZ = box.z + box.d / 2;
-  const mnY = 0, mxY = MAP.wallHeight;
+  const mnY = 0, mxY = wallHeight || MAP.wallHeight;
   let t0 = 0, t1 = Infinity;
   const axes = [
     [ox, dx, mnX, mxX],
@@ -221,9 +329,10 @@ function circleAABB(px, pz, r, box) {
   return [px, pz];
 }
 
-function inPlantZone(p) {
+function inPlantZone(p, map) {
+  const mapData = map || MAP;
   for (const key of ["A", "B"]) {
-    const s = MAP.sites[key];
+    const s = mapData.sites[key];
     if (Math.abs(p.x - s.cx) < s.w / 2 + 0.6 && Math.abs(p.z - s.cz) < s.d / 2 + 0.6) return true;
   }
   return false;
@@ -237,9 +346,11 @@ function lossBonus(streak) {
    플레이어 생성
 ========================================================= */
 
-function createPlayer(id, nickname, team, spawnIndex) {
+function createPlayer(id, nickname, team, charId, spawnIndex, map) {
   const role = team === "red" ? "attack" : "defend";
-  const s = MAP.spawns[role][spawnIndex % MAP.spawns[role].length];
+  const mapData = map || MAP;
+  const s = mapData.spawns[role][spawnIndex % mapData.spawns[role].length];
+  const ch = CHARACTERS[charId] || CHARACTERS.vanguard;
   // 플레이어별 유니크 색상 (알록달록)
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = ((hash << 5) - hash + id.charCodeAt(i)) | 0;
@@ -248,13 +359,16 @@ function createPlayer(id, nickname, team, spawnIndex) {
     id,
     nickname: nickname || "플레이어",
     team,
+    charId: ch.id,
     playerColor,
     x: s.x, y: 0, z: s.z,
     yaw: role === "attack" ? 0 : Math.PI,
     pitch: 0,
     vx: 0, vz: 0, vy: 0,
     cx: null, cz: null,      // 클라 예측 좌표(사격 원점용, 서버 위치와 2m 내 제한)
-    hp: MAX_HP,
+    hp: Math.round(MAX_HP * ch.hp),
+    maxHp: Math.round(MAX_HP * ch.hp),
+    speedMult: ch.speed,
     alive: true,
     weapon: "pistol",
     ammo: WEAPONS.pistol.magSize,
@@ -301,11 +415,15 @@ function setWeaponFree(player, weaponId) {
 ========================================================= */
 
 function shootRay(player, now) {
+  const m = player._match;
+  const map = m.map || MAP;
   const wpn = WEAPONS[player.weapon];
   // 발로란트: 이동 중 사격은 부정확, ADS 시 완화 — 단, 조준점에서 크게 벗어나기 전에 판정에 들어가도록 완만한 페널티
   const speed = Math.hypot(player.vx, player.vz);
-  const movePenalty = player.ads ? 1 + Math.min(0.16, speed * 0.03) : 1 + Math.min(0.5, speed * 0.10);
-  const spread = wpn.spread * (player.ads ? 0.35 : 1) * movePenalty;
+  // 정지 시 확산 = 무기 기본 스프레드(ADS 0.25~0.35배), 이동 배율(moveSpread)는 점진적으로 적용
+  const moveCoeff = 1 + Math.min(1, speed / MOVE_SPEED) * ((wpn.moveSpread ?? 1.6) - 1);
+  const adsCoeff = player.ads ? (wpn.adsSpread ?? 0.35) : 1;
+  const spread = wpn.spread * adsCoeff * (player.ads ? 1 : moveCoeff);
   const jitter = () => (Math.random() - 0.5) * 2;
 
   const y2 = player.yaw + jitter() * spread;
@@ -337,16 +455,16 @@ function shootRay(player, now) {
 
       let blocked = false;
       // 연막 차단
-      const smokes = player._match.smokes || [];
-      const now = player._match._now();
+      const smokes = m.smokes || [];
       for (const sm of smokes) {
         if (now - sm.born >= sm.dur) continue;
         const tSmoke = raySphere(ox, oy, oz, dx, dy, dz, sm.x, EYE_HEIGHT * 0.75, sm.z, sm.r);
         if (tSmoke != null && tSmoke < tHit) { blocked = true; break; }
       }
       if (blocked) continue;
-      for (const box of MAP.obstacles) {
-        const tBox = rayBox(ox, oy, oz, dx, dy, dz, box);
+      const wallH = map.wallHeight || MAP.wallHeight;
+      for (const box of map.obstacles) {
+        const tBox = rayBox(ox, oy, oz, dx, dy, dz, box, wallH);
         if (tBox != null && tBox < tHit) { blocked = true; break; }
       }
       if (blocked) continue;
@@ -372,8 +490,8 @@ function shootRay(player, now) {
   }
 
   let wallHitT = SHOT_RANGE;
-  for (const box of MAP.obstacles) {
-    const tHit = rayBox(ox, oy, oz, dx, dy, dz, box);
+  for (const box of map.obstacles) {
+    const tHit = rayBox(ox, oy, oz, dx, dy, dz, box, map.wallHeight || MAP.wallHeight);
     if (tHit != null && tHit < wallHitT) wallHitT = tHit;
   }
 
@@ -384,9 +502,12 @@ function shootRay(player, now) {
    매치 생성 — 라운드제
 ========================================================= */
 
-function createMatch(roomId) {
+function createMatch(roomId, opts) {
+  opts = opts || {};
+  const map = MAPS[opts.mapId] || MAP;
   const match = {
     roomId,
+    map,
     _playerMap: new Map(),
     teams: { red: [], blue: [] },
     scores: { red: 0, blue: 0 },     // 라운드 승수
@@ -420,7 +541,7 @@ function createMatch(roomId) {
 
     addPlayer(p) {
       const idx = match.teams[p.team].length;
-      const player = createPlayer(p.id, p.nickname, p.team, idx);
+      const player = createPlayer(p.id, p.nickname, p.team, p.charId, idx, match.map);
       player._match = match;
       match._playerMap.set(p.id, player);
       match.teams[p.team].push(p.id);
@@ -488,7 +609,9 @@ function createMatch(roomId) {
         }
         p.survivedRound = false;
         p.hasSpike = false;
-        p.hp = MAX_HP;
+        const ch = CHARACTERS[p.charId] || CHARACTERS.vanguard;
+        p.hp = Math.round(MAX_HP * ch.hp);
+        p.maxHp = p.hp;
         p.alive = true;
         p.vx = 0; p.vz = 0;
         p.firing = false;
@@ -501,7 +624,7 @@ function createMatch(roomId) {
         p.vy = 0;
         p.smokeReadyAt = 0;
         const role = match.roleOf(p.team);
-        const s = MAP.spawns[role][p.walkIndex % MAP.spawns[role].length];
+        const s = match.map.spawns[role][p.walkIndex % match.map.spawns[role].length];
         p.x = s.x; p.y = 0; p.z = s.z;
         p.cx = p.x; p.cz = p.z;
         p.yaw = role === "attack" ? 0 : Math.PI;
@@ -642,7 +765,7 @@ function createMatch(roomId) {
       if (data.type === "plant") {
         if (p.team !== match.attackTeam || !p.hasSpike) return;
         if (s.planted) return;
-        if (!inPlantZone(p)) return;
+        if (!inPlantZone(p, match.map)) return;
         p.planting = true;
         s.plantingId = p.id;
       } else if (data.type === "defuse") {
@@ -659,6 +782,7 @@ function createMatch(roomId) {
     skill(id, data) {
       const p = match._playerMap.get(id);
       if (!p || !p.alive || match.phase !== "combat") return;
+      const ch = CHARACTERS[p.charId] || CHARACTERS.vanguard;
       const now = match._now();
       const cp = Math.cos(p.pitch);
       const dirX = Math.sin(p.yaw) * cp;
@@ -668,11 +792,11 @@ function createMatch(roomId) {
 
       if (data.type === "smoke") {
         if (now < p.smokeReadyAt) return;
-        p.smokeReadyAt = now + SMOKE_COOLDOWN;
+        p.smokeReadyAt = now + ch.smokeCd;
         // 투사체 도착: 장애물 또는 사거리
         let landT = SMOKE_THROW_RANGE;
-        for (const box of MAP.obstacles) {
-          const t = rayBox(ox, oy, oz, dirX, dirY, dirZ, box);
+        for (const box of match.map.obstacles) {
+          const t = rayBox(ox, oy, oz, dirX, dirY, dirZ, box, match.map.wallHeight || MAP.wallHeight);
           if (t != null && t > 0.5 && t < landT) landT = t;
         }
         const sx = ox + dirX * landT;
@@ -685,14 +809,14 @@ function createMatch(roomId) {
         if (p.ultCharge < ULT_CHARGE_MAX) return;
         p.ultCharge = 0;
         let landT = ULT_THROW_RANGE;
-        for (const box of MAP.obstacles) {
-          const t = rayBox(ox, oy, oz, dirX, dirY, dirZ, box);
+        for (const box of match.map.obstacles) {
+          const t = rayBox(ox, oy, oz, dirX, dirY, dirZ, box, match.map.wallHeight || MAP.wallHeight);
           if (t != null && t > 0.5 && t < landT) landT = t;
         }
         const ux = ox + dirX * landT;
         const uz = oz + dirZ * landT;
-        match.pendingUlts.push({ id: id, x: ux, z: uz, t: now + ULT_PENDING_TIME });
-        return [{ type: "skill:ult", pid: id, x: ux, z: uz }];
+        match.pendingUlts.push({ id: id, x: ux, z: uz, r: ch.ultRadius, dmg: ch.ultDmg, t: now + ULT_PENDING_TIME });
+        return [{ type: "skill:ult", pid: id, x: ux, z: uz, r: ch.ultRadius }];
       }
 
       return [];
@@ -703,7 +827,7 @@ function createMatch(roomId) {
     _applyShot(actor, result, events) {
       const victim = result.target;
       victim.hp -= result.dmg;
-      events.push({ type: "hurt", pid: victim.id, byId: actor.id, dmg: result.dmg, headshot: result.head, hp: Math.max(0, victim.hp), hpMax: MAX_HP });
+      events.push({ type: "hurt", pid: victim.id, byId: actor.id, dmg: result.dmg, headshot: result.head, hp: Math.max(0, victim.hp), hpMax: victim.maxHp || MAX_HP });
 
       if (victim.hp <= 0) {
         victim.alive = false;
@@ -758,7 +882,7 @@ function createMatch(roomId) {
       // 설치 진행 (공격팀 캐리어만)
       const planter = s.plantingId ? match._playerMap.get(s.plantingId) : null;
       const plantValid = planter && planter.alive && planter.team === match.attackTeam &&
-        planter.hasSpike && inPlantZone(planter);
+        planter.hasSpike && inPlantZone(planter, match.map);
       if (plantValid) {
         planter.plantingProgress += dt / SPIKE_PLANT_TIME;
         if (planter.plantingProgress >= 1) {
@@ -826,9 +950,10 @@ function createMatch(roomId) {
             p.reloading = false;
           }
 
-          // 이동 (설치/해체 홀드 중에는 발로란트처럼 고정)
-          if (!p.planting && !p.defusing) {
-            const walk = p.keys.shift ? SPRINT_MULT : 1;
+          // 구매 단계에는 이동 불가 (게임 시작 후/전투 시작 전까지 자리를 지킨다)
+          // 이동 (전투 중 + 설치/해체 홀드 중에는 발로란트처럼 고정)
+          if (match.phase === "combat" && !p.planting && !p.defusing) {
+            const walk = (p.keys.shift ? SPRINT_MULT : 1) * (p.speedMult || 1);
             const y = p.yaw;
             let ix = 0, iz = 0;
             if (p.keys.w) { ix += Math.sin(y); iz += Math.cos(y); }
@@ -844,11 +969,11 @@ function createMatch(roomId) {
             p.x += p.vx * dt;
             p.z += p.vz * dt;
 
-            for (const box of MAP.obstacles) {
+            for (const box of match.map.obstacles) {
               const [nx, nz] = circleAABB(p.x, p.z, PLAYER_RADIUS, box);
               p.x = nx; p.z = nz;
             }
-            const hs = MAP.halfSize - PLAYER_RADIUS;
+            const hs = match.map.halfSize - PLAYER_RADIUS;
             p.x = clamp(p.x, -hs, hs);
             p.z = clamp(p.z, -hs, hs);
           }
@@ -904,13 +1029,15 @@ function createMatch(roomId) {
         const pu = match.pendingUlts[i];
         if (now < pu.t) continue;
         match.pendingUlts.splice(i, 1);
+        const rIdx = pu.r || ULT_RADIUS;
+        const dmgIdx = pu.dmg || ULT_DMG;
         // 범위 내 적 데미지
         for (const [, ep] of match._playerMap) {
           if (!ep.alive || ep.team === match._playerMap.get(pu.id)?.team) continue;
           const d = dist2(ep.x, ep.z, pu.x, pu.z);
-          if (d <= ULT_RADIUS + PLAYER_RADIUS) {
-            ep.hp -= ULT_DMG;
-            events.push({ type: "hurt", pid: ep.id, byId: pu.id, dmg: ULT_DMG, headshot: false, hp: Math.max(0, ep.hp), hpMax: MAX_HP });
+          if (d <= rIdx + PLAYER_RADIUS) {
+            ep.hp -= dmgIdx;
+            events.push({ type: "hurt", pid: ep.id, byId: pu.id, dmg: dmgIdx, headshot: false, hp: Math.max(0, ep.hp), hpMax: ep.maxHp || MAX_HP });
             if (ep.hp <= 0) {
               ep.alive = false; ep.hp = 0; ep.deaths++;
               const killer = match._playerMap.get(pu.id);
@@ -920,7 +1047,7 @@ function createMatch(roomId) {
             }
           }
         }
-        events.push({ type: "skill:ultboom", x: pu.x, z: pu.z, r: ULT_RADIUS });
+        events.push({ type: "skill:ultboom", x: pu.x, z: pu.z, r: rIdx });
       }
 
       // 스파이크 진행 (전투 단계)
@@ -970,11 +1097,14 @@ function createMatch(roomId) {
       if (!a || !b) return false;
       const ox = a.x, oy = EYE_HEIGHT, oz = a.z;
       const tx = b.x, ty = 1.0, tz = b.z;
-      const dx = tx - ox, dy = ty - oy, dz = tz - oz;
+      let dx = tx - ox, dy = ty - oy, dz = tz - oz;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      const end = 1 - 0.1 / dist; // 타깃 직전까지만 차단 (미터→노말라이즈 환산)
-      for (const box of MAP.obstacles) {
-        const t = rayBox(ox, oy, oz, dx, dy, dz, box);
+      if (dist < 0.001) return true;
+      dx /= dist; dy /= dist; dz /= dist; // 정규화 (rayBox t = 거리 m)
+      const end = dist - 0.1; // 타깃 직전까지만 차단
+      const wallH = match.map.wallHeight || MAP.wallHeight;
+      for (const box of match.map.obstacles) {
+        const t = rayBox(ox, oy, oz, dx, dy, dz, box, wallH);
         if (t != null && t > 0.3 && t < end) return false;
       }
       // 연막 시야 차단
@@ -1000,10 +1130,12 @@ function createMatch(roomId) {
       for (const [, p] of match._playerMap) {
         players.push({
           id: p.id, nickname: p.nickname, team: p.team, playerColor: p.playerColor,
+          charId: p.charId,
+          speedMult: p.speedMult,
           x: p.x, y: p.y, z: p.z,
           yaw: p.yaw, pitch: p.pitch,
           vy: p.vy,
-          hp: p.hp, alive: p.alive,
+          hp: p.hp, maxHp: p.maxHp, alive: p.alive,
           kills: p.kills, deaths: p.deaths,
           weapon: p.weapon, ammo: p.ammo,
           reloading: p.reloading,
@@ -1019,6 +1151,8 @@ function createMatch(roomId) {
       const smokes = match.smokes.filter(sm => now - sm.born < sm.dur).map(sm => ({ id: sm.id, x: sm.x, z: sm.z, r: sm.r, born: sm.born, dur: sm.dur }));
       return {
         t: match.tickCount,
+        serverTime: now,
+        mapId: match.map.id,
         phase: match.phase,
         round: match.round,
         timeLeft: Math.max(0, match.timeLeft),
@@ -1050,4 +1184,4 @@ function createMatch(roomId) {
   return match;
 }
 
-module.exports = { WEAPONS, MAP, TICK_RATE, STATE_RATE, createMatch, EYE_HEIGHT, SMOKE_RADIUS, SMOKE_COOLDOWN, SMOKE_DURATION, ULT_RADIUS, ULT_DMG, ULT_CHARGE_KILL };
+module.exports = { WEAPONS, MAP, MAPS, CHARACTERS, TICK_RATE, STATE_RATE, createMatch, EYE_HEIGHT, SMOKE_RADIUS, SMOKE_COOLDOWN, SMOKE_DURATION, ULT_RADIUS, ULT_DMG, ULT_CHARGE_KILL };
