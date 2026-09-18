@@ -525,6 +525,7 @@ function createMatch(roomId, opts) {
     lossStreak: { red: 0, blue: 0 },
     spike: {
       carrierId: null,
+      team: null,
       dropped: false, dropX: 0, dropZ: 0,
       planted: false, plantX: 0, plantZ: 0,
       plantingId: null,
@@ -591,6 +592,7 @@ function createMatch(roomId, opts) {
       match.roundWinner = null;
       match.roundEndReason = null;
       match.spike.carrierId = null;
+      match.spike.team = match.attackTeam;
       match.spike.dropped = false;
       match.spike.planted = false;
       match.spike.plantingId = null;
@@ -760,6 +762,16 @@ function createMatch(roomId, opts) {
         return;
       }
 
+      if (data.type === "pickup") {
+        // 구매/전투 어느 페이즈든 공격팀만 드랍 스파이크를 픽업
+        if (p.team === match.attackTeam && s.dropped && !s.planted && !p.hasSpike && dist2(p.x, p.z, s.dropX, s.dropZ) <= 2) {
+          s.dropped = false;
+          s.carrierId = p.id;
+          p.hasSpike = true;
+        }
+        return;
+      }
+
       if (match.phase !== "combat") return;
 
       if (data.type === "plant") {
@@ -887,6 +899,7 @@ function createMatch(roomId, opts) {
         planter.plantingProgress += dt / SPIKE_PLANT_TIME;
         if (planter.plantingProgress >= 1) {
           s.planted = true;
+          s.team = planter.team;
           s.plantX = planter.x;
           s.plantZ = planter.z;
           s.plantingId = null;
@@ -1050,8 +1063,8 @@ function createMatch(roomId, opts) {
         events.push({ type: "skill:ultboom", x: pu.x, z: pu.z, r: rIdx });
       }
 
-      // 스파이크 진행 (전투 단계)
-      if (match.phase === "combat") {
+      // 스파이크 진행 (전투 단계) — 단, 구매 단계에서도 드랍 스파이크 픽업(팀원 전달)은 허용
+      if (match.phase === "combat" || (match.phase === "buy" && match.spike.dropped)) {
         match._spikeTick(now, dt, events);
 
         // 라운드 종료 판정
@@ -1163,6 +1176,8 @@ function createMatch(roomId, opts) {
         defendTeam: match.defendTeam,
         spike: {
           carrierId: match.spike.carrierId,
+          team: match.spike.team,
+          carrierTeam: match.spike.team,
           dropped: match.spike.dropped,
           dropX: match.spike.dropX,
           dropZ: match.spike.dropZ,

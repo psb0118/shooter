@@ -337,7 +337,7 @@ function leaveRoom(socket, room) {
   socket.data.roomId = null;
   socket.data.role = null;
 
-  if (room.players.length === 0) {
+  if (humanCount(room) < 1) {
     ROOMS.delete(room.id);
   } else {
     broadcastLobby(room);

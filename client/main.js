@@ -505,10 +505,12 @@ function syncSmokeMeshes() {
 
 let ultTelegraph = null;
 let ultBoomMesh = null;
-function showUltTelegraph(x, z) {
+function showUltTelegraph(x, z, r) {
   if (ultTelegraph) scene.remove(ultTelegraph);
+  // 버그: 반경을 상수 ULT_RADIUS 로 고정 → 서버가 캐릭터별 ultRadius 를 r 로 보내주는데 무시됐다.
+  const rad = r || ULT_RADIUS;
   ultTelegraph = new THREE.Mesh(
-    new THREE.RingGeometry(ULT_RADIUS - 0.15, ULT_RADIUS, 32),
+    new THREE.RingGeometry(rad - 0.15, rad, 32),
     new THREE.MeshBasicMaterial({ color: 0xffd75f, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
   );
   ultTelegraph.rotation.x = -Math.PI / 2;
@@ -712,11 +714,14 @@ function interactTarget() {
     return null;
   }
   if (state.phase !== "combat") return null;
-  if (sp.planted && state.myTeam && state.myTeam !== state.spike.carrierTeam) {
+  // 버그: carrierTeam 은 서버 스냅샷에 없는 필드라 항상 undefined → 공격팀도 defuse 가 잡혔다.
+  // 서버가 내려주는 team 필드로만 판정 (정의되지 않은 team 은 방어적으로 defuse 불가 처리)
+  if (sp.planted && state.myTeam && sp.team && state.myTeam !== sp.team) {
     if (Math.hypot(state.x - sp.plantX, state.z - sp.plantZ) < 4) return "defuse";
     return "go-defuse";
   }
-  if (state.myTeam === "red" && !sp.dropped && Math.hypot(sp.dropX - state.x, sp.dropZ - state.z) < 4) return "pickup";
+  // 버그: 픽업은 스파이크가 바닥(dropped)에 있을 때만 가능한데 !sp.dropped 로 반대로 쓰였다
+  if (state.myTeam === "red" && sp.dropped && Math.hypot(sp.dropX - state.x, sp.dropZ - state.z) < 4) return "pickup";
   if (state.myTeam === "red" && myIsCarrier() && inPlantZone(state.x, state.z) && !sp.planted) return "plant";
   return null;
 }
@@ -1231,6 +1236,8 @@ function renderLobby(room) {
 
 function enterLobby(room) {
   state.inGame = false;
+  // 버그: 로비 재진입 시 이전 라운드의 맵/벽/사이트/플레이어 메시가 남아 중첩됐다 — 씬 정리 선행
+  clearWorldObjects();
   state.myTeam = room.players.find(p => p.socketId === socket.id)?.team || null;
   state.phase = "waiting";
   state.joinBuyOpened = false;
@@ -1492,6 +1499,11 @@ socket.on("game:buy", (d) => {
   if (d.ok && d.weapon && d.weapon !== state.myWeapon) {
     state.myWeapon = d.weapon;
     applyViewModel(d.weapon);
+  } else if (!d.ok && d.weapon && d.weapon !== state.myWeapon) {
+    // 버그: 실패 시 낙관적으로 바꿔둔 무기/뷰모델이 롤백되지 않아 표시가 어긋났다.
+    // 서버가 실패 응답으로 보내주는 현재(진짜) 무기로 되돌린다 (money 는 위에서 확정).
+    state.myWeapon = d.weapon;
+    applyViewModel(d.weapon);
   }
   ui.update();
   if (buyUIOpen()) refreshBuyGrid();
@@ -1545,7 +1557,7 @@ socket.on("skill:smoke", (d) => {
 
 socket.on("skill:ult", (d) => {
   if (!state.inGame) return;
-  showUltTelegraph(d.x, d.z);
+  showUltTelegraph(d.x, d.z, d.r);
 });
 
 socket.on("skill:ultboom", (d) => {
@@ -1669,6 +1681,8 @@ $("#pause").addEventListener("click", (e) => {
 
 function enterLobbyUI() {
   state.inGame = false;
+  // 버그: (btn-leave / btn-back-lobby) 로비 복귀 시 미정리된 3D 오브젝트가 다음 라운드에 중첩됐다
+  clearWorldObjects();
   $("#end-screen").classList.add("hidden");
   $("#weapon-select").classList.add("hidden");
   $("#hud").classList.add("hidden");
@@ -1714,12 +1728,7 @@ function animate(now) {
       scopeOvr.classList.add("hidden");
     }
 
-    // 화면 흔들림 (궁극기 폭발 등)
-    if (state.screenShake > 0.001) {
-      state.screenShake *= Math.pow(0.001, dt); // 빠르게 감쇠
-      camera.position.x += (Math.random() - 0.5) * state.screenShake;
-      camera.position.y += (Math.random() - 0.5) * state.screenShake;
-    }
+    // 화면 흔들림 (궁극기 폭발 등) — 오프셋 적용은 아래 camera.position.set 이후에 수행
 
     // 뷰모델 ADS 위치 (x는 항상 중앙 고정)
     const vx = 0;
@@ -1731,6 +1740,14 @@ function animate(now) {
   }
 
   camera.position.set(state.x, EYE_HEIGHT + state.y, state.z);
+
+  // 버그: 흔들림 오프셋이 set 이전에 더해져 매 프레임 set 이 덮어쓰며 효과가 없었다.
+  // set 으로 정확한 위치를 복원한 뒤 흔들림을 더해야 화면 흔들림이 유지된다.
+  if (state.screenShake > 0.001) {
+    state.screenShake *= Math.pow(0.001, dt); // 빠르게 감쇠
+    camera.position.x += (Math.random() - 0.5) * state.screenShake;
+    camera.position.y += (Math.random() - 0.5) * state.screenShake;
+  }
   const dx = Math.sin(state.yaw) * Math.cos(state.pitch);
   const dy = Math.sin(state.pitch);
   const dz = Math.cos(state.yaw) * Math.cos(state.pitch);
