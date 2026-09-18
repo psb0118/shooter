@@ -616,6 +616,42 @@ function anyKey() {
   return state.keys.w || state.keys.a || state.keys.s || state.keys.d;
 }
 
+/* TAB 점수판 — 킬/데스/어시스트 오버레이 */
+function toggleScoreboard(open) {
+  state.tabOpen = open;
+  const sb = $("#tab-scoreboard");
+  if (!sb) return;
+  if (!open) { sb.classList.add("hidden"); return; }
+  const rows = [];
+  for (const [id, ent] of state.players) {
+    if (ent.name == null) continue;
+    rows.push({
+      name: ent.name, team: ent.team,
+      kills: ent.kills || 0, deaths: ent.deaths || 0, assists: ent.assists || 0,
+    });
+  }
+  rows.push({
+    name: state.myNick || "나", team: state.myTeam,
+    kills: state.kills, deaths: state.deaths, assists: state.assists || 0,
+  });
+  const tRow = (r) => `<tr class="tab-row ${r.team}"><td class="tn">${esc(r.name)}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.assists}</td></tr>`;
+  sb.innerHTML = `
+    <div class="tab-wrap">
+      <div class="tab-head">스코어보드 <kbd>TAB</kbd> — 탁상에서 떼면 닫힘</div>
+      <table class="tab-table">
+        <thead><tr><th>플레이어</th><th>킬</th><th>데스</th><th>어시스트</th></tr></thead>
+        <tbody>${rows.map(tRow).join("")}</tbody>
+      </table>
+    </div>`;
+  sb.classList.remove("hidden");
+}
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Tab") { e.preventDefault(); if (state.inGame) toggleScoreboard(true); }
+});
+window.addEventListener("keyup", (e) => {
+  if (e.code === "Tab") { toggleScoreboard(false); }
+});
+
 window.addEventListener("keydown", (e) => {
   if (!state.inGame) return;
   switch (e.code) {
@@ -1429,6 +1465,7 @@ socket.on("game:state", (snap) => {
     ent.target.z = p.z;
     ent.target.yaw = p.yaw;
     ent.target.hp = p.hp;
+    ent.kills = p.kills || 0; ent.deaths = p.deaths || 0; ent.assists = p.assists || 0;
     ent.hpBar.draw(p, null);
   }
   for (const [id, ent] of state.players) {
