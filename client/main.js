@@ -1206,15 +1206,10 @@ function renderLobbySelect() {
   }
 }
 
-/* 총구 섬광 — 사격 직후 짧게 '반짝' */
+/* 총구 섬광 — 총구 조명/불빛 제거 (비활성) */
 let muzzleFlashT = 0;
 function addMuzzleFlash() {
-  const el = $("#muzzle-flash");
-  if (!el) return;
-  el.classList.remove("hidden", "flash");
-  void el.offsetWidth;
-  el.classList.add("flash");
-  muzzleFlashT = performance.now();
+  return;
 }
 
 /* ================= 로비 UI ================= */
@@ -1720,13 +1715,9 @@ function animate(now) {
     camera.fov = state.cam.fov;
     camera.updateProjectionMatrix();
 
-    // 스나이퍼 스코프 오버레이
+    // 스나이퍼 스코프 오버레이 — 화면 어두워지는 효과 제거 (항상 숨김)
     const scopeOvr = $("#scope-overlay");
-    if (state.myWeapon === "sr" && state.ads && state.alive) {
-      scopeOvr.classList.remove("hidden");
-    } else {
-      scopeOvr.classList.add("hidden");
-    }
+    if (scopeOvr) scopeOvr.classList.add("hidden");
 
     // 화면 흔들림 (궁극기 폭발 등) — 오프셋 적용은 아래 camera.position.set 이후에 수행
 

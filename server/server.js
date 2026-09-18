@@ -239,7 +239,15 @@ function stepBot(room, botId) {
     } else {
       /* 사이트 고정 방어 (약간의 진영 변위) */
       const site = map.sites[bot.site];
-      const anchor = { x: site.cx + (me.x < 0 ? -5 : 5), z: site.cz - 8 };
+      // 봇별 고유 오프셋 — 같은 위치에 뭉치지 않고 각자 자리를 지킨다
+      let h = 0;
+      for (const c of botId) h = (h * 31 + c.charCodeAt(0)) | 0;
+      const offAng = ((h % 360) * Math.PI) / 180;
+      const offR = 4 + Math.abs(h % 7); // 4~10 단위 거리
+      const anchor = {
+        x: site.cx + Math.sin(offAng) * offR + (me.x < 0 ? -5 : 5),
+        z: site.cz - 8 + Math.cos(offAng) * offR,
+      };
       if (Math.hypot(anchor.x - me.x, anchor.z - me.z) < 3) {
         moveTo = null; hold = true;
       } else {
