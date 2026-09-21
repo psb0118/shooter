@@ -1,4 +1,4 @@
-/* =========================================================
+﻿/* =========================================================
    client/main.js — 5v5 전술 슈터 (발로란트식 라운드, 스파이크, 경제)
    - Three.js 3D 렌더링 / Pointer Lock 조준 / 로컬 예측
    - 라운드 진행, 스파이크 설치/해체, 구매 UI, HUD
@@ -1245,7 +1245,7 @@ function renderLobbySelect() {
 /* 총구 섬광 — 총구 조명/불빛 제거 (비활성) */
 let muzzleFlashT = 0;
 function addMuzzleFlash() {
-  return;
+  return SALVAGE_HACK ? null : null;
 }
 
 /* ================= 로비 UI ================= */
@@ -1559,11 +1559,14 @@ socket.on("game:fx", (fx) => {
     new THREE.Vector3(ox, oy, oz),
     new THREE.Vector3(fx.hitX, fx.hitY, fx.hitZ),
   ]);
-  const line = new THREE.Line(geo, mat);
-  scene.add(line);
-  // 로컬 샷은 더 길게 표시 (탄속 체감)
-  const life = fx.weapon === "sr" ? 0.2 : (isMine ? 0.12 : 0.09);
-  state.tracers.push({ line, born: performance.now(), life });
+   // 발사 빛줄기(트레이서) 제거 — 시각효과 비활성
+   if (false) {
+   const line = new THREE.Line(geo, mat);
+   scene.add(line);
+   // 로컬 샷은 더 길게 표시 (탄속 체감)
+   const life = fx.weapon === "sr" ? 0.2 : (isMine ? 0.12 : 0.09);
+   state.tracers.push({ line, born: performance.now(), life });
+   }
 
   // 총구 섬광 (내 총알만) — 발사 순간 화면 중앙 섬광
   if (isMine && fx.snd !== false) {
@@ -1571,14 +1574,14 @@ socket.on("game:fx", (fx) => {
     addMuzzleFlash();
   }
   if (isMine && fx.hit) showHitMarker();
-  if (fx.hit) {
-    const col = fx.weapon === "sr" ? 0xffd75f : 0xffffff;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: col, transparent: true, opacity: 1, blending: THREE.AdditiveBlending }));
-    sprite.position.set(fx.hitX, fx.hitY, fx.hitZ);
-    sprite.scale.set(0.75, 0.75, 1);
-    scene.add(sprite);
-    state.impacts.push({ sprite, born: performance.now() });
-  }
+   if (fx.hit && false) {
+     const col = fx.weapon === "sr" ? 0xffd75f : 0xffffff;
+     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: col, transparent: true, opacity: 1, blending: THREE.AdditiveBlending }));
+     sprite.position.set(fx.hitX, fx.hitY, fx.hitZ);
+     sprite.scale.set(0.75, 0.75, 1);
+     scene.add(sprite);
+     state.impacts.push({ sprite, born: performance.now() });
+   }
 });
 
 socket.on("skill:smoke", (d) => {
