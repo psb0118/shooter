@@ -1,0 +1,7 @@
+﻿HEAD=7d2c0c6
+HEADmsg=Bugfix(7): spike carrierTeam snapshot+defuse gating, sell-phase buy, map fence, pickup, zombies, buy-phase pickup, defuse gating (from opencode fix session)
+revcount=18
+originMain=7d2c0c6c115b124ccd2b02fed22f85b277f9cd50
+branch=master
+=== diff vs origin/main (name-status) ===
+

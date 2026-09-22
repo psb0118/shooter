@@ -1,0 +1,11 @@
+﻿=== (1) working tree dirty? (empty = all committed===
+dirty_count=1
+=== (2) origin/main tip (pushed state) ===
+7d2c0c6 Bugfix(7): spike carrierTeam snapshot+defuse gating, sell-phase buy, map fence, pickup, zombies, buy-phase pickup, defuse gating (from opencode fix session) 2a42531 feat: 罹먮┃?걔?踰덉㎏ 留돠룸큸 AI 媛쒖꽑 + ?대룞/?곕쭑/?ㅼ퐫??臾닿린 泥닿컧 媛쒖꽑 f334dfc ?ㅽ궗(?곕쭑/沅곴레湲?쨌?먰봽쨌留?媛쒖꽑 + 罹먮┃???됱긽 + ?ㅻ굹?댄띁
+=== (3) HEAD vs origin/main ===
+head==origin=True
+=== (4) fix strings present in pushed working tree? ===
+client\main.js :: state.spike.team => False
+client\main.js :: sp.dropped => False
+server\game.js :: carrierTeam: match.spike.team => False
+server\server.js :: humanCount(room) < 1 => False

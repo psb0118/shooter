@@ -840,6 +840,12 @@ function createMatch(roomId, opts) {
       const victim = result.target;
       victim.hp -= result.dmg;
       events.push({ type: "hurt", pid: victim.id, byId: actor.id, dmg: result.dmg, headshot: result.head, hp: Math.max(0, victim.hp), hpMax: victim.maxHp || MAX_HP });
+      // 어시스트 추적 — victim을 최근에 때린 다른 공격자 기록
+      const now = match._now();
+      match._assistHit = match._assistHit || new Map();
+      let vm = match._assistHit.get(victim.id);
+      if (!vm) { vm = new Map(); match._assistHit.set(victim.id, vm); }
+      vm.set(actor.id, { t: now });
 
       if (victim.hp <= 0) {
         victim.alive = false;
@@ -848,6 +854,21 @@ function createMatch(roomId, opts) {
         actor.kills++;
         actor.money = clamp(actor.money + MONEY_KILL, 0, MAX_MONEY);
         actor.ultCharge = Math.min(ULT_CHARGE_MAX, actor.ultCharge + ULT_CHARGE_KILL);
+
+        // 어시스트 — 최근 8초 내에 victim을 때렸던 동맹 누구에게나 1회 부여
+        const hits = match._assistHit ? match._assistHit.get(victim.id) : null;
+        if (hits) {
+          const now = match._now();
+          for (const [aid, rec] of hits) {
+            if (aid === actor.id || now - rec.t > 8000) continue;
+            const ap = match._playerMap.get(aid);
+            if (ap && ap.team === actor.team) {
+              ap.assists = (ap.assists || 0) + 1;
+              events.push({ type: "assist", pid: ap.id, killerId: victim.id });
+            }
+          }
+          match._assistHit.delete(victim.id);
+        }
         events.push({ type: "kill", killerId: actor.id, killerName: actor.nickname, killerTeam: actor.team, weapon: actor.weapon, victimId: victim.id, victimName: victim.nickname, victimTeam: victim.team, headshot: result.head });
 
         // 캐리어 사망 → 스파이크 드랍
@@ -1149,7 +1170,7 @@ function createMatch(roomId, opts) {
           yaw: p.yaw, pitch: p.pitch,
           vy: p.vy,
           hp: p.hp, maxHp: p.maxHp, alive: p.alive,
-          kills: p.kills, deaths: p.deaths,
+          kills: p.kills, deaths: p.deaths, assists: p.assists || 0, assists: p.assists || 0,
           weapon: p.weapon, ammo: p.ammo,
           reloading: p.reloading,
           money: p.money,

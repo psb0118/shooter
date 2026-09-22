@@ -1,4 +1,4 @@
-/* =========================================================
+﻿/* =========================================================
    client/main.js — 5v5 전술 슈터 (발로란트식 라운드, 스파이크, 경제)
    - Three.js 3D 렌더링 / Pointer Lock 조준 / 로컬 예측
    - 라운드 진행, 스파이크 설치/해체, 구매 UI, HUD
@@ -616,6 +616,42 @@ function anyKey() {
   return state.keys.w || state.keys.a || state.keys.s || state.keys.d;
 }
 
+/* TAB 점수판 — 킬/데스/어시스트 오버레이 */
+function toggleScoreboard(open) {
+  state.tabOpen = open;
+  const sb = $("#tab-scoreboard");
+  if (!sb) return;
+  if (!open) { sb.classList.add("hidden"); return; }
+  const rows = [];
+  for (const [id, ent] of state.players) {
+    if (ent.name == null) continue;
+    rows.push({
+      name: ent.name, team: ent.team,
+      kills: ent.kills || 0, deaths: ent.deaths || 0, assists: ent.assists || 0,
+    });
+  }
+  rows.push({
+    name: state.myNick || "나", team: state.myTeam,
+    kills: state.kills, deaths: state.deaths, assists: state.assists || 0,
+  });
+  const tRow = (r) => `<tr class="tab-row ${r.team}"><td class="tn">${esc(r.name)}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.assists}</td></tr>`;
+  sb.innerHTML = `
+    <div class="tab-wrap">
+      <div class="tab-head">스코어보드 <kbd>TAB</kbd> — 탁상에서 떼면 닫힘</div>
+      <table class="tab-table">
+        <thead><tr><th>플레이어</th><th>킬</th><th>데스</th><th>어시스트</th></tr></thead>
+        <tbody>${rows.map(tRow).join("")}</tbody>
+      </table>
+    </div>`;
+  sb.classList.remove("hidden");
+}
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Tab") { e.preventDefault(); if (state.inGame) toggleScoreboard(true); }
+});
+window.addEventListener("keyup", (e) => {
+  if (e.code === "Tab") { toggleScoreboard(false); }
+});
+
 window.addEventListener("keydown", (e) => {
   if (!state.inGame) return;
   switch (e.code) {
@@ -1206,15 +1242,10 @@ function renderLobbySelect() {
   }
 }
 
-/* 총구 섬광 — 사격 직후 짧게 '반짝' */
+/* 총구 섬광 — 총구 조명/불빛 제거 (비활성) */
 let muzzleFlashT = 0;
 function addMuzzleFlash() {
-  const el = $("#muzzle-flash");
-  if (!el) return;
-  el.classList.remove("hidden", "flash");
-  void el.offsetWidth;
-  el.classList.add("flash");
-  muzzleFlashT = performance.now();
+  return SALVAGE_HACK ? null : null;
 }
 
 /* ================= 로비 UI ================= */
@@ -1434,6 +1465,7 @@ socket.on("game:state", (snap) => {
     ent.target.z = p.z;
     ent.target.yaw = p.yaw;
     ent.target.hp = p.hp;
+    ent.kills = p.kills || 0; ent.deaths = p.deaths || 0; ent.assists = p.assists || 0;
     ent.hpBar.draw(p, null);
   }
   for (const [id, ent] of state.players) {
@@ -1527,11 +1559,14 @@ socket.on("game:fx", (fx) => {
     new THREE.Vector3(ox, oy, oz),
     new THREE.Vector3(fx.hitX, fx.hitY, fx.hitZ),
   ]);
-  const line = new THREE.Line(geo, mat);
-  scene.add(line);
-  // 로컬 샷은 더 길게 표시 (탄속 체감)
-  const life = fx.weapon === "sr" ? 0.2 : (isMine ? 0.12 : 0.09);
-  state.tracers.push({ line, born: performance.now(), life });
+   // 발사 빛줄기(트레이서) 제거 — 시각효과 비활성
+   if (false) {
+   const line = new THREE.Line(geo, mat);
+   scene.add(line);
+   // 로컬 샷은 더 길게 표시 (탄속 체감)
+   const life = fx.weapon === "sr" ? 0.2 : (isMine ? 0.12 : 0.09);
+   state.tracers.push({ line, born: performance.now(), life });
+   }
 
   // 총구 섬광 (내 총알만) — 발사 순간 화면 중앙 섬광
   if (isMine && fx.snd !== false) {
@@ -1539,14 +1574,14 @@ socket.on("game:fx", (fx) => {
     addMuzzleFlash();
   }
   if (isMine && fx.hit) showHitMarker();
-  if (fx.hit) {
-    const col = fx.weapon === "sr" ? 0xffd75f : 0xffffff;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: col, transparent: true, opacity: 1, blending: THREE.AdditiveBlending }));
-    sprite.position.set(fx.hitX, fx.hitY, fx.hitZ);
-    sprite.scale.set(0.75, 0.75, 1);
-    scene.add(sprite);
-    state.impacts.push({ sprite, born: performance.now() });
-  }
+   if (fx.hit && false) {
+     const col = fx.weapon === "sr" ? 0xffd75f : 0xffffff;
+     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ color: col, transparent: true, opacity: 1, blending: THREE.AdditiveBlending }));
+     sprite.position.set(fx.hitX, fx.hitY, fx.hitZ);
+     sprite.scale.set(0.75, 0.75, 1);
+     scene.add(sprite);
+     state.impacts.push({ sprite, born: performance.now() });
+   }
 });
 
 socket.on("skill:smoke", (d) => {
@@ -1720,13 +1755,9 @@ function animate(now) {
     camera.fov = state.cam.fov;
     camera.updateProjectionMatrix();
 
-    // 스나이퍼 스코프 오버레이
+    // 스나이퍼 스코프 오버레이 — 화면 어두워지는 효과 제거 (항상 숨김)
     const scopeOvr = $("#scope-overlay");
-    if (state.myWeapon === "sr" && state.ads && state.alive) {
-      scopeOvr.classList.remove("hidden");
-    } else {
-      scopeOvr.classList.add("hidden");
-    }
+    if (scopeOvr) scopeOvr.classList.add("hidden");
 
     // 화면 흔들림 (궁극기 폭발 등) — 오프셋 적용은 아래 camera.position.set 이후에 수행
 

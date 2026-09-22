@@ -239,9 +239,24 @@ function stepBot(room, botId) {
     } else {
       /* 사이트 고정 방어 (약간의 진영 변위) */
       const site = map.sites[bot.site];
-      const anchor = { x: site.cx + (me.x < 0 ? -5 : 5), z: site.cz - 8 };
+      // 봇별 고유 오프셋 — 같은 위치에 뭉치지 않고 각자 자리를 지킨다
+      let h = 0;
+      for (const c of botId) h = (h * 31 + c.charCodeAt(0)) | 0;
+      const offAng = ((h % 360) * Math.PI) / 180;
+      const offR = 4 + Math.abs(h % 7); // 4~10 단위 거리
+      const anchor = {
+        x: site.cx + Math.sin(offAng) * offR + (me.x < 0 ? -5 : 5),
+        z: site.cz - 8 + Math.cos(offAng) * offR,
+      };
       if (Math.hypot(anchor.x - me.x, anchor.z - me.z) < 3) {
-        moveTo = null; hold = true;
+        // 도착: 잠시 숨 고르기 후, 다음 무작위 지점으로 계속 순찰 (제자리 고정 방지)
+        if (!bot.patrolAt) bot.patrolAt = now;
+        if (now - bot.patrolAt < 0.9) {
+          moveTo = null; hold = true;
+        } else {
+          bot.patrolAt = now;
+          if (wp.length > 1) bot.wpIdx = Math.floor(Math.random() * wp.length);
+        }
       } else {
         moveTo = anchor;
       }
@@ -274,7 +289,11 @@ function stepBot(room, botId) {
       }
       bot.holdAim = { yaw, pitch };
     }
-    if (bestD < 18) {
+    // 사격 중에도 좌우 스트레이프 — 멈춰서 쏘지 않고 흔들며 교전 (더 활발)
+    if (firing) {
+      if (Math.random() < 0.72) { if (Math.random() < 0.5) keys.a = true; else keys.d = true; }
+      if (Math.random() < 0.15) keys.shift = true;
+    } else if (bestD < 18) {
       if (Math.random() < 0.5) keys.a = true; else keys.d = true;
     }
   } else if (ghost && now >= bot.reactUntil) {
