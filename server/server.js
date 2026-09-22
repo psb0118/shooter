@@ -289,7 +289,11 @@ function stepBot(room, botId) {
       }
       bot.holdAim = { yaw, pitch };
     }
-    if (bestD < 18) {
+    // 사격 중에도 좌우 스트레이프 — 멈춰서 쏘지 않고 흔들며 교전 (더 활발)
+    if (firing) {
+      if (Math.random() < 0.72) { if (Math.random() < 0.5) keys.a = true; else keys.d = true; }
+      if (Math.random() < 0.15) keys.shift = true;
+    } else if (bestD < 18) {
       if (Math.random() < 0.5) keys.a = true; else keys.d = true;
     }
   } else if (ghost && now >= bot.reactUntil) {
