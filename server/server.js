@@ -249,7 +249,14 @@ function stepBot(room, botId) {
         z: site.cz - 8 + Math.cos(offAng) * offR,
       };
       if (Math.hypot(anchor.x - me.x, anchor.z - me.z) < 3) {
-        moveTo = null; hold = true;
+        // 도착: 잠시 숨 고르기 후, 다음 무작위 지점으로 계속 순찰 (제자리 고정 방지)
+        if (!bot.patrolAt) bot.patrolAt = now;
+        if (now - bot.patrolAt < 0.9) {
+          moveTo = null; hold = true;
+        } else {
+          bot.patrolAt = now;
+          if (wp.length > 1) bot.wpIdx = Math.floor(Math.random() * wp.length);
+        }
       } else {
         moveTo = anchor;
       }
