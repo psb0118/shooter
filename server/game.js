@@ -742,6 +742,7 @@ function createMatch(roomId, opts) {
         p.planting = false;
         p.plantingProgress = 0;
         p.defusing = false;
+        if (s.plantingId === p.id) s.plantingId = null;
         if (s.defusingId === p.id) {
           s.defusingId = null;
           // 발로란트: 해체 절반(3.5초)을 넘겼으면 진행 보존, 미만이면 초기화
@@ -894,7 +895,7 @@ function createMatch(roomId, opts) {
       // 설치 진행 (공격팀 캐리어만)
       const planter = s.plantingId ? match._playerMap.get(s.plantingId) : null;
       const plantValid = planter && planter.alive && planter.team === match.attackTeam &&
-        planter.hasSpike && inPlantZone(planter, match.map);
+        planter.hasSpike && planter.planting && inPlantZone(planter, match.map);
       if (plantValid) {
         planter.plantingProgress += dt / SPIKE_PLANT_TIME;
         if (planter.plantingProgress >= 1) {
@@ -1084,7 +1085,7 @@ function createMatch(roomId, opts) {
             win = match.defendTeam; reason = "timeout";
           }
 
-          if (!win && aliveDefend <= 0) { win = match.attackTeam; reason = "elim"; }
+          if (!win && aliveDefend <= 0 && !match.spike.planted) { win = match.attackTeam; reason = "elim"; }
           if (!win && aliveAttack <= 0 && !match.spike.planted) { win = match.defendTeam; reason = "elim"; }
 
           if (win) {
