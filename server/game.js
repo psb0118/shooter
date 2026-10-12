@@ -1171,7 +1171,7 @@ function createMatch(roomId, opts) {
           yaw: p.yaw, pitch: p.pitch,
           vy: p.vy,
           hp: p.hp, maxHp: p.maxHp, alive: p.alive,
-          kills: p.kills, deaths: p.deaths, assists: p.assists || 0, assists: p.assists || 0,
+          kills: p.kills, deaths: p.deaths, assists: p.assists || 0,
           weapon: p.weapon, ammo: p.ammo,
           reloading: p.reloading,
           money: p.money,
