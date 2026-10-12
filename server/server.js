@@ -401,7 +401,7 @@ setInterval(() => {
           io.to(room.id).emit("game:kill", {
             killerId: ev.killerId, killerName: ev.killerName, killerTeam: ev.killerTeam,
             victimId: ev.victimId, victimName: ev.victimName, victimTeam: ev.victimTeam,
-            headshot: ev.headshot,
+            headshot: ev.headshot, weapon: ev.weapon,
           });
           break;
         }
@@ -558,6 +558,10 @@ io.on("connection", (socket) => {
   socket.on("lobby:start", () => {
     const room = ROOMS.get(socket.data.roomId);
     if (!room) return;
+    if (room.status !== "lobby") {
+      socket.emit("lobby:start", { ok: false, reason: "이미 게임이 진행 중입니다." });
+      return;
+    }
     if (room.host !== socket.id) {
       socket.emit("lobby:start", { ok: false, reason: "방장만 시작할 수 있습니다." });
       return;
@@ -570,8 +574,8 @@ io.on("connection", (socket) => {
 
     room.status = "playing";
     room.tickCount = 0;
-    room.match.start();
     fillBots(room);
+    room.match.start();
 
     io.to(room.id).emit("game:started", {
       ok: true,

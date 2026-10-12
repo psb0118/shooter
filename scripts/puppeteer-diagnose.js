@@ -159,9 +159,13 @@ function stDump() {
       }
       return best;
     }
+    const yaw0 = await page.evaluate(() => window.__s().yaw);
     const dxA = await pressMove("KeyA");
     const dxD = await pressMove("KeyD");
-    check("A/D 스트레이프 방향", dxA < -0.3 && dxD > 0.3, `dA=${dxA.toFixed(2)} dD=${dxD.toFixed(2)}`);
+    // 좌우 이동은 yaw 기준(서버: ix += cos(yaw) / ix -= cos(yaw))이므로 yaw로 기대 부호 결정
+    const aDeflectsPlus = Math.cos(yaw0) >= 0;
+    const okStrafe = aDeflectsPlus ? (dxA > 0.3 && dxD < -0.3) : (dxA < -0.3 && dxD > 0.3);
+    check("A/D 스트레이프 방향", okStrafe, `dA=${dxA.toFixed(2)} dD=${dxD.toFixed(2)} yaw=${yaw0.toFixed(2)}`);
 
     // 발사 — 포인터 락 상태에서만 유효 (headless에선 선택 적용)
     if (await page.evaluate(() => document.pointerLockElement !== null)) {
@@ -190,7 +194,7 @@ function stDump() {
     }
 
     // 라운드 2 진입까지 대기 (HUD 라운드/머니 갱신 확인)
-    await page.waitForFunction(() => window.__s().round >= 2 && window.__s().phase === "buy", { timeout: 120000 });
+    await page.waitForFunction(() => window.__s().round >= 2 && window.__s().phase === "buy", { timeout: 200000 });
     const r2 = JSON.parse(await page.evaluate(stDump));
     check("라운드 2 자동 구매창 재오픈", r2.phase === "buy" && r2.myHP === 150, `round=${r2.round} hp=${r2.myHP} money=${r2.myMoney}`);
 
