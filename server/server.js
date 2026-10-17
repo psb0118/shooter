@@ -228,6 +228,8 @@ function stepBot(room, botId) {
       }
     }
   } else {
+    /* 방어 — 순찰용 경유지(wp)는 공격 분기와 동일하게 사이트 웨이포인트 사용 */
+    const wp = map.waypoints[bot.site];
     if (spike.planted) {
       /* 설치된 스파이크를 향해 해체 */
       if (Math.hypot(spike.plantX - me.x, spike.plantZ - me.z) <= 3.4) {

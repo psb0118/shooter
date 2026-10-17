@@ -1042,7 +1042,8 @@ function createMatch(roomId, opts) {
               const shots = wpn.pellets || 1;
               for (let k = 0; k < shots; k++) {
                 const result = shootRay(p, now);
-                events.push({ type: "shot", pid: p.id, weapon: p.weapon, snd: k === 0, ...result });
+                const { target: _t, part: _p, dmg: _d, ...rayResult } = result;
+                events.push({ type: "shot", pid: p.id, weapon: p.weapon, snd: k === 0, ...rayResult });
                 if (!result.hit || !result.target) continue;
                 match._applyShot(p, result, events);
                 const victim = result.target;

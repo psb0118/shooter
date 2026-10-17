@@ -108,8 +108,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert(botMoved, "봇 AI 이동");
     ok("봇 AI 전투 이동");
 
-    /* 라운드 종료 이벤트 수신 (구매 12s + 전투 최대 100s → 최대 150초) */
-    const re = await once(a, "round:end", 150000);
+    /* 라운드 종료 이벤트 수신 (구매 12s + 전투 최대 100s + 설치 후 폭발 45s → 최대 ~200초) */
+    const re = await once(a, "round:end", 200000);
     assert(re.winner === "red" || re.winner === "blue", `round:end 수신 (winner=${re.winner})`);
     ok(`round:end 수신 (winner=${re.winner}, reason=${re.reason})`);
 
