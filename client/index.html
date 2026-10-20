@@ -11,6 +11,7 @@
 
   <!-- ==================== 로비 ==================== -->
   <div id="lobby" class="overlay">
+    <div id="lobby-toast" class="hidden"></div>
     <div class="lobby-box">
       <h1>🎯 SHOOTER</h1>
       <p class="sub">5v5 전술 슈터 · 발로란트식 라운드</p>
@@ -18,6 +19,8 @@
       <div class="lobby-row">
         <input id="nickname" maxlength="16" placeholder="닉네임" autocomplete="off" />
       </div>
+
+      <div id="lobby-loadout" class="lobby-loadout"></div>
 
       <!-- 캐릭터 선택 (정보 카드) -->
       <div class="lobby-section">
@@ -176,7 +179,6 @@
       <div class="scope-dot"></div>
     </div>
 
-    <div id="muzzle-flash" class="hidden"></div>
     <div id="smoke-blind" class="hidden"></div>
 
     <div id="killfeed"></div>

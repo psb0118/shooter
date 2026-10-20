@@ -130,6 +130,13 @@ const MAPS = {
     desc: "균형 잡힌 중앙 구조와 넓은 플랭크. 올라운더 지향.",
     halfSize: 52,
     wallHeight: 5.5,
+    theme: {
+      sky: 0x8fb0dd, fog: 0x9db4d6,
+      ground: 0x7c8ba0,
+      obstacleH: 0.55, obstacleS: 0.30, obstacleL: 0.36, obstacleSpread: 0.12,
+      edge: 0x7482a0, wall: 0x38415c,
+      hemiSky: 0xcfe4ff, hemiGround: 0x667799, sun: 1.15,
+    },
     obstacles: [
       // 중앙 구조물 (타워 + 남북 블록 — 리듬 있는 배치)
       { x:  0,  z:  0,  w: 12, d: 12 },
@@ -212,6 +219,13 @@ const MAPS = {
     desc: "좁은 레인과 깊숙한 코너. 근접·갱크 중심 맵.",
     halfSize: 48,
     wallHeight: 6,
+    theme: {
+      sky: 0xe0a878, fog: 0xd9a070,
+      ground: 0xbb8b5e,
+      obstacleH: 0.08, obstacleS: 0.55, obstacleL: 0.42, obstacleSpread: 0.16,
+      edge: 0x8a5a34, wall: 0x7a4a2a,
+      hemiSky: 0xffe0b8, hemiGround: 0x8a5a34, sun: 1.35,
+    },
     obstacles: [
       { x:  0,  z:   0, w:  8, d:  8 },
       { x:  0,  z:  16, w:  6, d:  6 },
@@ -586,6 +600,13 @@ function createMatch(roomId, opts) {
     _startRound(events) {
       const now = match._now();
       match.round++;
+      // 하프타임(12라운드 종료 후) 진영 교대 — 공/수 역할을 번갈아 (발로란트식)
+      if (match.round === ROUNDS_TO_WIN - 1) {
+        const tmp = match.attackTeam;
+        match.attackTeam = match.defendTeam;
+        match.defendTeam = tmp;
+        events.push({ type: "sidechange", attackTeam: match.attackTeam, defendTeam: match.defendTeam });
+      }
       match.phase = "buy";
       match.phaseEndAt = now + BUY_TIME;
       match.timeLeft = BUY_TIME;

@@ -142,6 +142,8 @@ function resetBotRound(me, round) {
     // AI 난이도: 반응 시간 + 조준 오차 (봇별 랜덤 0.6~1.0)
     skill: 0.6 + Math.random() * 0.4,
     reactUntil: 0,
+    engagedAt: 0,
+    reactJitter: Math.random() * 0.3,
     holdAim: null,
     burstLeft: 0,
     nextShotT: 0,
@@ -228,8 +230,7 @@ function stepBot(room, botId) {
       }
     }
   } else {
-    /* 방어 — 순찰용 경유지(wp)는 공격 분기와 동일하게 사이트 웨이포인트 사용 */
-    const wp = map.waypoints[bot.site];
+    /* 방어 — 사이트 주변을 순찰하며 각을 지킨다 */
     if (spike.planted) {
       /* 설치된 스파이크를 향해 해체 */
       if (Math.hypot(spike.plantX - me.x, spike.plantZ - me.z) <= 3.4) {
@@ -239,25 +240,30 @@ function stepBot(room, botId) {
         moveTo = { x: spike.plantX, z: spike.plantZ };
       }
     } else {
-      /* 사이트 고정 방어 (약간의 진영 변위) */
+      /* 사이트 방어 — 정해진 자리로 이동 후, 주기적으로 순찰 지점을 바꿔 계속 움직인다 */
       const site = map.sites[bot.site];
       // 봇별 고유 오프셋 — 같은 위치에 뭉치지 않고 각자 자리를 지킨다
       let h = 0;
       for (const c of botId) h = (h * 31 + c.charCodeAt(0)) | 0;
-      const offAng = ((h % 360) * Math.PI) / 180;
-      const offR = 4 + Math.abs(h % 7); // 4~10 단위 거리
-      const anchor = {
-        x: site.cx + Math.sin(offAng) * offR + (me.x < 0 ? -5 : 5),
-        z: site.cz - 8 + Math.cos(offAng) * offR,
-      };
+      const anchors = [];
+      const baseAng = ((h % 360) * Math.PI) / 180;
+      for (let i = 0; i < 3; i++) {
+        const ang = baseAng + i * 2.1;
+        const r = 5 + ((Math.abs(h + i * 7) % 8));
+        anchors.push({
+          x: site.cx + Math.sin(ang) * r + (me.x < 0 ? -5 : 5),
+          z: site.cz - 8 + Math.cos(ang) * r,
+        });
+      }
+      const anchor = anchors[bot.wpIdx % anchors.length];
       if (Math.hypot(anchor.x - me.x, anchor.z - me.z) < 3) {
-        // 도착: 잠시 숨 고르기 후, 다음 무작위 지점으로 계속 순찰 (제자리 고정 방지)
+        // 도착: 잠시 숨 고르기 후 다음 순찰 지점으로 이동 (제자리 고정 방지)
         if (!bot.patrolAt) bot.patrolAt = now;
-        if (now - bot.patrolAt < 0.9) {
+        if (now - bot.patrolAt < 0.7) {
           moveTo = null; hold = true;
         } else {
           bot.patrolAt = now;
-          if (wp.length > 1) bot.wpIdx = Math.floor(Math.random() * wp.length);
+          bot.wpIdx = (bot.wpIdx + 1) % anchors.length; // 다음 자리로 실제 이동
         }
       } else {
         moveTo = anchor;
@@ -272,36 +278,43 @@ function stepBot(room, botId) {
 
   const reactDelay = 0.35 + (1 - bot.skill) * 0.45; // 숙련도 낮을수록 늦은 반응
 
+  // 적을 처음 인식하면 그 순간부터 반응 딜레이 시작 (즉시 조준·사격 방지)
+  if (target && los && !bot.engagedAt) bot.engagedAt = now;
+  if (!target || !los) bot.engagedAt = 0;
+
   if (target && los) {
     // 반응 시간 경과 전에는 조준도 못함 (처음 보자마자 즉시 조준 불가)
-    if (now >= bot.reactUntil) {
+    if (now >= (bot.engagedAt ? bot.engagedAt + reactDelay + (bot.reactJitter || 0) : 0)) {
       const aimErr = Math.min(0.22, 0.02 + bestD * 0.0022 + (1 - bot.skill) * 0.03);
       const jitter = () => (Math.random() - 0.5) * 2 * aimErr;
       yaw = Math.atan2(target.x - me.x, target.z - me.z) + jitter() * 0.8;
       pitch = Math.atan2((target.y + 1.0) - 1.6, bestD) + jitter() * 0.7;
       // 사격: 연사 시 정확도 급감 + 반응 딜레이 후 점사
-      const canShoot = now >= bot.nextShotT && bestD < 42 && Math.random() < 0.45 * bot.skill;
+      const canShoot = now >= bot.nextShotT && bestD < 42 && Math.random() < 0.6 * bot.skill;
       if (canShoot) {
         firing = true;
         bot.burstLeft = 2 + Math.floor(Math.random() * 2);
-        bot.nextShotT = now + (0.9 + Math.random() * 0.6);
+        bot.nextShotT = now + (0.55 + Math.random() * 0.4);
       } else if (bot.burstLeft > 0) {
         firing = true;
         bot.burstLeft--;
       }
       bot.holdAim = { yaw, pitch };
     }
-    // 사격 중에도 좌우 스트레이프 — 멈춰서 쏘지 않고 흔들며 교전 (더 활발)
-    if (firing) {
+    // 교전 중에도 활발히 움직인다 — 스트레이프 + (원거리면 목표 방향 전진)
+    if (firing || bestD < 22) {
       if (Math.random() < 0.72) { if (Math.random() < 0.5) keys.a = true; else keys.d = true; }
       if (Math.random() < 0.15) keys.shift = true;
-    } else if (bestD < 18) {
-      if (Math.random() < 0.5) keys.a = true; else keys.d = true;
+    }
+    // 사거리가 멀면 조준을 유지한 채 교전 위치로 접근 (멈춰서 사격 방지)
+    if (bestD > 16 && moveTo) {
+      keys.w = true;
     }
   } else if (ghost && now >= bot.reactUntil) {
     // 기억 속 적 방향으로 천천히 조준 (정확도 낮음 — 메모리라서)
     yaw = Math.atan2(ghost.x - me.x, ghost.z - me.z);
     pitch = 0;
+    if (moveTo) { keys.w = true; } // 기억 추적 중에도 계속 이동
   } else if (moveTo) {
     yaw = Math.atan2(moveTo.x - me.x, moveTo.z - me.z);
     pitch = 0;
@@ -309,13 +322,9 @@ function stepBot(room, botId) {
     if (Math.random() < 0.1) keys.shift = true;
   } else if (hold) {
     /* 시야 360도 순찰 — 반응 준비 */
-    if (now < bot.reactUntil) bot.reactUntil = now;
     bot.nudgeT = (bot.nudgeT || 0) + 1;
-    if (bot.nudgeT > 90) { yaw = me.yaw + 2.4; bot.nudgeT = 0; }
+    if (bot.nudgeT > 60) { yaw = me.yaw + 2.4; bot.nudgeT = 0; }
   }
-
-  // 적을 처음 마주친 순간 반응 딜레이 시작
-  if (target && los && now >= bot.reactUntil) bot.reactUntil = now + reactDelay + Math.random() * 0.3;
 
   /* 전투 중에는 설치/해체를 일시 중단 */
   if (wantInteract && target && los && bestD < 14) wantInteract = null;
@@ -415,6 +424,11 @@ setInterval(() => {
           });
           break;
         }
+        case "sidechange":
+          io.to(room.id).emit("game:sidechange", {
+            attackTeam: ev.attackTeam, defendTeam: ev.defendTeam,
+          });
+          break;
         case "roundend": {
           io.to(room.id).emit("round:end", {
             round: ev.round,

@@ -186,7 +186,8 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 container.appendChild(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x667799, 1.0));
+const hemiLight = new THREE.HemisphereLight(0xcfe4ff, 0x667799, 1.0);
+scene.add(hemiLight);
 const sun = new THREE.DirectionalLight(0xffffff, 1.15);
 sun.position.set(40, 90, 25);
 scene.add(sun);
@@ -265,14 +266,30 @@ function buildWorld(map) {
   clearWorldObjects();
   state.map = map;
   const hs = map.halfSize;
+  const th = map.theme || {};
+
+  // 맵 테마별 하늘/안개/조명 적용 (다채로운 분위기)
+  const skyCol = new THREE.Color(th.sky != null ? th.sky : 0x9db4d6);
+  scene.background = skyCol;
+  if (scene.fog) scene.fog.color = new THREE.Color(th.fog != null ? th.fog : 0x9db4d6);
+  if (hemiLight) { hemiLight.color.set(th.hemiSky != null ? th.hemiSky : 0xcfe4ff); hemiLight.groundColor.set(th.hemiGround != null ? th.hemiGround : 0x667799); }
+  if (sun) sun.intensity = th.sun != null ? th.sun : 1.15;
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(hs * 2, hs * 2),
-    new THREE.MeshLambertMaterial({ color: 0x8899ad })
+    new THREE.MeshLambertMaterial({ color: th.ground != null ? th.ground : 0x8899ad })
   );
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
   state.mapObjects.push(ground);
+
+  // 바닥 그리드 라인 — 단조로운 바닥에 구조감/색감 추가
+  const grid = new THREE.GridHelper(hs * 2, 26, th.edge != null ? th.edge : 0x5c6a82, th.edge != null ? th.edge : 0x5c6a82);
+  grid.position.y = 0.02;
+  grid.material.opacity = 0.25;
+  grid.material.transparent = true;
+  scene.add(grid);
+  state.mapObjects.push(grid);
 
   for (const team of ["red", "blue"]) {
     const role = team === "red" ? "attack" : "defend";
@@ -288,12 +305,16 @@ function buildWorld(map) {
     }
   }
 
+  const baseH = th.obstacleH != null ? th.obstacleH : 0.58;
+  const baseS = th.obstacleS != null ? th.obstacleS : 0.12;
+  const baseL = th.obstacleL != null ? th.obstacleL : 0.22;
+  const spread = th.obstacleSpread != null ? th.obstacleSpread : 0.002;
   for (const ob of map.obstacles) {
     const geo = new THREE.BoxGeometry(ob.w, map.wallHeight, ob.d);
-    // 각 장애물마다 약간의 색상 변화 ( Realistic feel )
-    const h = 0.58 + (((ob.x * 13 + ob.z * 7) | 0) % 100) * 0.001;
-    const s = 0.12 + (((ob.z * 11 + ob.x * 3) | 0) % 100) * 0.002;
-    const l = 0.22 + (((ob.x + ob.z * 5) | 0) % 100) * 0.0016;
+    // 각 장애물마다 색상 변화 (다채로운 맵)
+    const h = baseH + (((ob.x * 13 + ob.z * 7) | 0) % 100) * 0.001;
+    const s = baseS + (((ob.z * 11 + ob.x * 3) | 0) % 100) * spread;
+    const l = baseL + (((ob.x + ob.z * 5) | 0) % 100) * (spread * 0.8);
     const boxMat = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(h, s, l) });
     const mesh = new THREE.Mesh(geo, boxMat);
     mesh.position.set(ob.x, map.wallHeight / 2, ob.z);
@@ -301,14 +322,14 @@ function buildWorld(map) {
     state.mapObjects.push(mesh);
     const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(geo),
-      new THREE.LineBasicMaterial({ color: 0x5c6a82 })
+      new THREE.LineBasicMaterial({ color: th.edge != null ? th.edge : 0x5c6a82 })
     );
     edges.position.copy(mesh.position);
     scene.add(edges);
     state.mapObjects.push(edges);
   }
 
-  const wallMat = new THREE.MeshLambertMaterial({ color: 0x2b3350, transparent: true, opacity: 0.9 });
+  const wallMat = new THREE.MeshLambertMaterial({ color: th.wall != null ? th.wall : 0x2b3350, transparent: true, opacity: 0.9 });
   const wallGeo = new THREE.BoxGeometry(hs * 2, map.wallHeight + 2, 2);
   const walls = [
     [0, 0, hs, 0],
@@ -407,7 +428,29 @@ function makePlayerMesh(p) {
   hpBar.sprite.position.set(0, 2.76, 0);
   group.add(hpBar.sprite);
 
-  return { group, hpBar };
+  // 스파이크(폭탄) 캐리어 표시 — 머리 위 아이콘 (들고 있을 때만 표시)
+  const spikeSpr = makeSpikeSprite();
+  spikeSpr.visible = false;
+  group.add(spikeSpr);
+
+  return { group, hpBar, spikeSpr };
+}
+
+function makeSpikeSprite() {
+  const cv = document.createElement("canvas");
+  cv.width = 64; cv.height = 64;
+  const ctx = cv.getContext("2d");
+  ctx.font = "46px 'Segoe UI Emoji','Malgun Gothic',sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.shadowColor = "rgba(0,0,0,.9)";
+  ctx.shadowBlur = 8;
+  ctx.fillText("💣", 32, 34);
+  const tex = new THREE.CanvasTexture(cv);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
+  spr.scale.set(0.7, 0.7, 1);
+  spr.position.set(0, 3.15, 0);
+  return spr;
 }
 
 function meshBox(w, h, d, mat) {
@@ -1105,10 +1148,21 @@ const ui = {
     $("#money").textContent = state.myMoney.toLocaleString();
     $("#ws-money").textContent = state.myMoney.toLocaleString();
 
-    // 스파이크 상태 (설치됨 → 타이머 표시)
+    // 스파이크 상태 — 설치됨(타이머) / 소지자 표시
     const spikeEl = $("#spike-status");
     if (state.spike.planted) {
       spikeEl.textContent = `💣 ${formatClock(state.timeLeft)}`;
+      spikeEl.className = "planted";
+      spikeEl.classList.remove("hidden");
+    } else if (state.spike.carrierId) {
+      const carrier = [...state.players.entries()].find(([id]) => id === state.spike.carrierId);
+      const nm = myIsCarrier() ? "나" : (carrier ? (carrier[1].name || "아군") : "아군");
+      spikeEl.textContent = `💣 스파이크: ${nm}`;
+      spikeEl.className = "carrying";
+      spikeEl.classList.remove("hidden");
+    } else if (state.spike.dropped) {
+      spikeEl.textContent = "💣 스파이크 드랍됨";
+      spikeEl.className = "dropped";
       spikeEl.classList.remove("hidden");
     } else {
       spikeEl.classList.add("hidden");
@@ -1182,6 +1236,36 @@ function esc(s) {
 }
 
 /* 캐릭터/맵/무기 선택 카드 */
+
+let lobbyToastTimer = 0;
+function lobbyToast(msg, color) {
+  const el = $("#lobby-toast");
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = color || "#8be28b";
+  el.classList.remove("hidden");
+  clearTimeout(lobbyToastTimer);
+  lobbyToastTimer = setTimeout(() => el.classList.add("hidden"), 1700);
+}
+
+function pickPulse(el) {
+  if (!el) return;
+  el.classList.remove("pop");
+  void el.offsetWidth;
+  el.classList.add("pop");
+  setTimeout(() => el.classList.remove("pop"), 300);
+}
+
+function updateLobbyLoadout(pulse) {
+  const el = $("#lobby-loadout");
+  if (!el) return;
+  const ch = (state.characters || {})[state.myChar];
+  const mp = (state.maps || {})[state.mapId];
+  el.innerHTML = `<span class="lo-title">현재 설정</span>
+    <span class="lo-item ${ch ? "on" : ""} ${pulse === "char" ? "pulse" : ""}">${ch ? (ch.emoji || "🎯") + " " + esc(ch.name) : "캐릭터 미선택"}<em>장착</em></span>
+    <span class="lo-item ${mp ? "on" : ""} ${pulse === "map" ? "pulse" : ""}">🗺️ ${mp ? esc(mp.name) : "맵 미선택"}<em>선택</em></span>`;
+}
+
 function renderLobbySelect() {
   const chars = state.characters || {};
   const charEl = $("#char-select");
@@ -1201,6 +1285,9 @@ function renderLobbySelect() {
         state.myChar = b.dataset.char;
         state.speedMult = (chars[state.myChar]?.speed) || 1;
         renderLobbySelect();
+        pickPulse(charEl.querySelector(`.pick-card[data-char="${state.myChar}"]`));
+        updateLobbyLoadout("char");
+        lobbyToast(`✓ ${chars[state.myChar]?.name || "캐릭터"} 장착!`);
       });
     }
   } else if (charEl) {
@@ -1220,6 +1307,9 @@ function renderLobbySelect() {
       b.addEventListener("click", () => {
         state.mapId = b.dataset.map;
         renderLobbySelect();
+        pickPulse(mapEl.querySelector(`.pick-card[data-map="${state.mapId}"]`));
+        updateLobbyLoadout("map");
+        lobbyToast(`✓ ${mapsData[state.mapId]?.name || "맵"} 선택! (방 만들 때 적용)`);
       });
     }
   } else if (mapEl) {
@@ -1240,12 +1330,13 @@ function renderLobbySelect() {
   } else if (wEl) {
     wEl.innerHTML = '<div class="pk-note">서버 연결 대기 중…</div>';
   }
+
+  updateLobbyLoadout();
 }
 
-/* 총구 섬광 — 총구 조명/불빛 제거 (비활성) */
-let muzzleFlashT = 0;
+/* 총구 섬광 — 총구/조준점 발광 제거 (비활성) */
 function addMuzzleFlash() {
-  return SALVAGE_HACK ? null : null;
+  // 총구 불빛·잔상 제거 — 아무것도 하지 않음
 }
 
 /* ================= 로비 UI ================= */
@@ -1449,9 +1540,10 @@ socket.on("game:state", (snap) => {
       mesh.group.position.set(p.x, 0, p.z);
       mesh.group.position.y = p.y || 0;
       mesh.group.rotation.y = p.yaw;
-      ent = { group: mesh.group, hpBar: mesh.hpBar, target: { x: p.x, y: p.y || 0, z: p.z, yaw: p.yaw, hp: p.hp }, px: p.x, pz: p.z, pt: snap.t, vx: 0, vz: 0 };
+      ent = { group: mesh.group, hpBar: mesh.hpBar, spikeSpr: mesh.spikeSpr, name: p.nickname, target: { x: p.x, y: p.y || 0, z: p.z, yaw: p.yaw, hp: p.hp }, px: p.x, pz: p.z, pt: snap.t, vx: 0, vz: 0 };
       state.players.set(p.id, ent);
     }
+    if (ent.spikeSpr) ent.spikeSpr.visible = !!p.hasSpike && p.alive !== false;
     if (ent.px != null && snap.t !== ent.pt) {
       const dtx = (snap.t - ent.pt) || 1;
       ent.vx = (p.x - ent.px) * (SERVER_TICK_RATE / dtx);
