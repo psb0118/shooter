@@ -306,10 +306,15 @@
 
 @media (max-width: 760px) {
   #scoreboard { transform: translateX(-50%) scale(.82); transform-origin: top center; }
-  #healthbar-wrap { width: 220px; }
-  #weapon-hud { min-width: 160px; }
+  #healthbar-wrap { width: 200px; }
+  #weapon-hud { min-width: 150px; right: 14px; }
   #ammo { font-size: 26px; }
-  #skill-hud { bottom: 106px; }
+  #skill-hud { bottom: 260px; }
+  #btn-fire { right: 20px; bottom: 100px; }
+  #btn-reload { right: 26px; bottom: 190px; }
+  #btn-swap { right: 106px; bottom: 110px; }
+  #btn-interact { right: 106px; bottom: 190px; }
+  #joy-base { bottom: 120px; }
   .ws-box { width: 94vw; padding: 18px 18px 14px; }
   .ws-box h2 { font-size: 24px; letter-spacing: 3px; }
   .ws-wallet b { font-size: 22px; }

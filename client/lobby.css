@@ -370,6 +370,16 @@
   .brief-card { grid-column: 1 / -1; flex: none; }
 }
 
+@media (max-width: 480px) {
+  .lobby-brand { gap: 8px; min-width: 0; }
+  .brand-mark { width: 30px; height: 30px; }
+  .brand-kicker { font-size: 6px; letter-spacing: 1px; }
+  .lobby-brand h1 { font-size: 19px; letter-spacing: 2px; }
+  .lobby-top { gap: 8px; align-items: center; }
+  .server-pill { font-size: 8px; padding: 4px 7px; gap: 5px; }
+  .server-pill b { font-size: 8px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
   html { scroll-behavior: auto; }

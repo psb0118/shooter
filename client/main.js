@@ -1853,8 +1853,6 @@ socket.on("game:state", (snap) => {
     ent.target.hp = p.hp;
     ent.kills = p.kills || 0; ent.deaths = p.deaths || 0; ent.assists = p.assists || 0;
     ent.hpBar.draw(p, null);
-    // 스폰 겹침 등으로 카메라 바로 앞에 붙은 캐릭터는 1인칭 시야를 가리지 않게 숨김
-    ent.group.visible = Math.hypot(ent.target.x - state.x, ent.target.z - state.z) > 1.1;
   }
   for (const [id, ent] of state.players) {
     if (!seen.has(id)) { scene.remove(ent.group); state.players.delete(id); }

@@ -402,7 +402,7 @@ function createPlayer(id, nickname, team, charId, spawnIndex, map) {
     firing: false,
     kills: 0,
     deaths: 0,
-    walkIndex: 0,
+    spawnSlot: spawnIndex,   // 라운드 시작마다 같은 팀 내 고유 스폰 유지
     smokeReadyAt: 0,
     ultCharge: 0,
   };
@@ -555,7 +555,13 @@ function createMatch(roomId, opts) {
     roleOf(team) { return team === match.attackTeam ? "attack" : "defend"; },
 
     addPlayer(p) {
-      const idx = match.teams[p.team].length;
+      // 팀 내에서 아직 쓰이지 않은 스폰 슬롯을 찾아 항상 고유하게 배정
+      const usedSlots = new Set();
+      for (const q of match._playerMap.values()) {
+        if (q.team === p.team) usedSlots.add(q.spawnSlot);
+      }
+      let idx = 0;
+      while (usedSlots.has(idx)) idx++;
       const player = createPlayer(p.id, p.nickname, p.team, p.charId, idx, match.map);
       player._match = match;
       match._playerMap.set(p.id, player);
@@ -647,11 +653,12 @@ function createMatch(roomId, opts) {
         p.vy = 0;
         p.smokeReadyAt = 0;
         const role = match.roleOf(p.team);
-        const s = match.map.spawns[role][p.walkIndex % match.map.spawns[role].length];
+        const teamSpawns = match.map.spawns[role];
+        const slot = (p.spawnSlot != null ? p.spawnSlot : 0) % teamSpawns.length;
+        const s = teamSpawns[slot];
         p.x = s.x; p.y = 0; p.z = s.z;
         p.cx = p.x; p.cz = p.z;
         p.yaw = role === "attack" ? 0 : Math.PI;
-        p.walkIndex++;
         if (role === "attack") attackers.push(p);
       }
 
