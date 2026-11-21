@@ -971,18 +971,8 @@ window.addEventListener("keydown", (e) => {
     case "Space":
       if (state.alive && !state.planting && !state.defusing) state.keys.space = true;
       break;
-    case "KeyQ":
-      if (state.phase === "combat" && state.alive && !buyUIOpen()) {
-        socket.emit("game:skill", { type: "smoke" });
-        Sfx.switchW();
-      }
-      break;
-    case "KeyX":
-      if (state.phase === "combat" && state.alive && state.ultCharge >= 100 && !buyUIOpen()) {
-        socket.emit("game:skill", { type: "ult" });
-        Sfx.shot("sr");
-      }
-      break;
+    case "KeyQ": useSmoke(); break;
+    case "KeyX": useUlt(); break;
     case "Escape":
       if (buyUIOpen()) closeBuyUI(true);
       break;
@@ -1058,6 +1048,20 @@ function interactTarget() {
 }
 
 function myIsCarrier() { return state.spike.carrierId === state.myId; }
+
+function useSmoke() {
+  if (state.phase !== "combat" || !state.alive || buyUIOpen()) return false;
+  socket.emit("game:skill", { type: "smoke" });
+  Sfx.switchW();
+  return true;
+}
+
+function useUlt() {
+  if (state.phase !== "combat" || !state.alive || state.ultCharge < 100 || buyUIOpen()) return false;
+  socket.emit("game:skill", { type: "ult" });
+  Sfx.shot("sr");
+  return true;
+}
 
 let holding = false;
 let plantHoldStart = null;
@@ -1245,16 +1249,21 @@ document.addEventListener("touchstart", (e) => {
     if (t.target.closest("#joy-base")) {
       if (joy.active) continue;
       joy.active = true; joy.id = t.identifier; joy.ox = t.clientX; joy.oy = t.clientY;
-    } else if (t.target.classList.contains("btn-control")) {
-      const id = t.target.id;
-      if (id === "btn-fire") { state.firing = true; flushInput(); }
-      else if (id === "btn-reload") { socket.emit("game:reload"); Sfx.reload(); }
-      else if (id === "btn-swap") toggleBuyUI(false);
-      else if (id === "btn-interact") startInteract(true);
-      btnTimer.set(t.identifier, id);
     } else {
-      // 나머지 화면 영역 → 스와이프로 시야 회전
-      look.active = true; look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
+      const btn = t.target.closest(".btn-control");
+      if (btn) {
+        const id = btn.id;
+        if (id === "btn-fire") { state.firing = true; flushInput(); }
+        else if (id === "btn-reload") { socket.emit("game:reload"); Sfx.reload(); }
+        else if (id === "btn-swap") toggleBuyUI(false);
+        else if (id === "btn-interact") startInteract(true);
+        else if (id === "btn-smoke") useSmoke();
+        else if (id === "btn-ult") useUlt();
+        btnTimer.set(t.identifier, id);
+      } else {
+        // 나머지 화면 영역 → 스와이프로 시야 회전
+        look.active = true; look.id = t.identifier; look.lx = t.clientX; look.ly = t.clientY;
+      }
     }
   }
 }, { passive: false });
@@ -1440,11 +1449,22 @@ const ui = {
     const uc = $("#skill-ult-charge");
     if (uc) uc.textContent = ultPct >= 100 ? "궁극기!" : ultPct + "%";
     if (ultEl) ultEl.classList.toggle("ready", ultPct >= 100);
+    const smokeReady = state.alive && state.phase === "combat";
     const smokeEl = $("#skill-smoke");
     if (smokeEl) {
-      const ready = state.alive && state.phase === "combat";
-      smokeEl.classList.toggle("ready", ready);
-      smokeEl.style.opacity = ready ? 1 : 0.5;
+      smokeEl.classList.toggle("ready", smokeReady);
+      smokeEl.style.opacity = smokeReady ? 1 : 0.5;
+    }
+    const smokeBtn = $("#btn-smoke");
+    if (smokeBtn) {
+      smokeBtn.classList.toggle("ready", smokeReady);
+      smokeBtn.setAttribute("aria-disabled", String(!smokeReady));
+    }
+    const ultBtn = $("#btn-ult");
+    if (ultBtn) {
+      const ultReady = smokeReady && ultPct >= 100;
+      ultBtn.classList.toggle("ready", ultReady);
+      ultBtn.setAttribute("aria-disabled", String(!ultReady));
     }
     // 스코프 오버레이 상태 동기화
     const scopeOvr = $("#scope-overlay");

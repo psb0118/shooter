@@ -381,6 +381,19 @@ html, body { touch-action: none; overscroll-behavior: none; -webkit-tap-highligh
 #btn-interact { right: 110px; bottom: 132px; width: 56px; height: 56px; font-size: 24px; background: rgba(255,215,95,.22); }
 #btn-interact.active { background: rgba(255,215,95,.85); }
 
+/* Q/X 스킬 터치 버튼 */
+.btn-skill {
+  flex-direction: column; gap: 2px; width: 56px; height: 56px;
+  opacity: .5; transition: opacity .15s, box-shadow .15s, background .15s;
+}
+.btn-skill .btn-skill-key { font-size: 15px; font-weight: 900; line-height: 1; }
+.btn-skill .btn-skill-name { font-size: 7px; line-height: 1; letter-spacing: .4px; color: #d8ecff; }
+#btn-smoke { right: 92px; bottom: 220px; background: rgba(95,231,255,.14); border-color: rgba(95,231,255,.42); color: #bff4ff; }
+#btn-ult { right: 20px; bottom: 220px; background: rgba(255,215,95,.12); border-color: rgba(255,215,95,.42); color: #ffe89a; }
+.btn-skill.ready { opacity: 1; }
+#btn-smoke.ready { background: rgba(95,231,255,.26); border-color: #5fe7ff; box-shadow: 0 0 18px rgba(95,231,255,.35); }
+#btn-ult.ready { background: rgba(255,215,95,.24); border-color: #ffd75f; box-shadow: 0 0 18px rgba(255,215,95,.35); }
+
 #joy-base {
   position: absolute; left: 30px; bottom: 34px; width: 108px; height: 108px; border-radius: 50%;
   border: 2px solid rgba(255,255,255,.4); background: rgba(255,255,255,.10);

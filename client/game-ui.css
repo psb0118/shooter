@@ -309,7 +309,9 @@
   #healthbar-wrap { width: 200px; }
   #weapon-hud { min-width: 150px; right: 14px; }
   #ammo { font-size: 26px; }
-  #skill-hud { bottom: 260px; }
+  #skill-hud { bottom: 330px; }
+  #btn-smoke { right: 82px; bottom: 260px; }
+  #btn-ult { right: 18px; bottom: 260px; }
   #btn-fire { right: 20px; bottom: 100px; }
   #btn-reload { right: 26px; bottom: 190px; }
   #btn-swap { right: 106px; bottom: 110px; }

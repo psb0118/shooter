@@ -293,5 +293,68 @@ function toCombat(m) {
   ok(`${ROUNDS_TO_WIN}라운드 선승 → 종료 (${JSON.stringify(m.scores)})`);
 }
 
+/* --- 10. 5v5 / 봇 재배치 스폰 슬롯 회귀 --- */
+{
+  console.log("10) 5v5/봇 재배치 스폰 슬롯");
+  const m = createMatch("SPAWN");
+  m._now = () => 0;
+  const add = (id, team) => m.addPlayer({ id, nickname: id, team });
+  add("human", "red");
+  for (let i = 0; i < 4; i++) add(`red-bot-${i}`, "red");
+  for (let i = 0; i < 5; i++) add(`blue-bot-${i}`, "blue");
+  m.start();
+
+  const all = () => [...m._playerMap.values()];
+  const coords = () => all().map(p => `${p.x.toFixed(2)},${p.z.toFixed(2)}`);
+  const slots = team => all().filter(p => p.team === team).map(p => p.spawnSlot).sort((a, b) => a - b);
+  const assertSpawns = (label) => {
+    assert.equal(all().length, 10, `${label}: 10명`);
+    assert.equal(new Set(coords()).size, 10, `${label}: 10개 좌표 고유`);
+    assert.deepEqual(slots("red"), [0, 1, 2, 3, 4], `${label}: 레드 슬롯`);
+    assert.deepEqual(slots("blue"), [0, 1, 2, 3, 4], `${label}: 블루 슬롯`);
+  };
+
+  assertSpawns("5v5");
+  m._startRound([]); // 원래 모든 플레이어가 0번 스폰으로 겹치던 지점
+  assertSpawns("다음 라운드");
+
+  // 봇 교체: 비어 있는 슬롯 1, 3을 우선 재사용
+  m.removePlayer("red-bot-0");
+  m.removePlayer("red-bot-2");
+  const fill1 = add("red-fill-0", "red");
+  const fill2 = add("red-fill-1", "red");
+  assert.deepEqual([fill1.spawnSlot, fill2.spawnSlot].sort((a, b) => a - b), [1, 3], "빈 슬롯 우선 배정");
+  m.start();
+  assertSpawns("봇 교체 후");
+
+  // 전체 봇 clearBots → 재보충과 동일한 경로
+  for (const p of all()) if (p.id !== "human") m.removePlayer(p.id);
+  for (let i = 0; i < 4; i++) add(`red-refill-${i}`, "red");
+  for (let i = 0; i < 5; i++) add(`blue-refill-${i}`, "blue");
+  m.start();
+  assertSpawns("봇 전체 재배치 후");
+  ok("5v5/봇 재배치 후 10개 스폰 좌표 고유");
+}
+
+/* --- 11. 궁극기 서버 스킬 경로 --- */
+{
+  console.log("11) 궁극기 서버 스킬");
+  const m = createMatch("ULT");
+  m._now = () => 0;
+  m.addPlayer({ id: "r", nickname: "레드", team: "red" });
+  m.addPlayer({ id: "b", nickname: "블루", team: "blue" });
+  m.start();
+  m.phase = "combat";
+  const r = m._playerMap.get("r");
+  r.x = 0; r.z = 0; r.yaw = 0; r.pitch = 0; r.ultCharge = 0;
+  assert.equal((m.skill("r", { type: "ult" }) || []).length, 0, "충전 전 궁극기 거부");
+  r.ultCharge = 100;
+  const events = m.skill("r", { type: "ult" }) || [];
+  assert(events.some(e => e.type === "skill:ult"), "충전 후 궁극기 발동 이벤트");
+  assert.equal(r.ultCharge, 0, "발동 후 충전 소모");
+  assert.equal(m.pendingUlts.length, 1, "낙뢰 예약");
+  ok("궁극기 충전 조건/발동/충전 소모");
+}
+
 console.log(`\n[game.js] ${passed}개 테스트 통과`);
 process.exit(0);

@@ -65,6 +65,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     assert.equal(bots.length, 9, "봇 9명");
     assert.equal(gs.state.players.filter(p => p.team === "red").length, 5, "레드 5명");
     assert.equal(gs.state.players.filter(p => p.team === "blue").length, 5, "블루 5명");
+    const spawnKeys = new Set(gs.state.players.map(p => `${Number(p.x).toFixed(2)},${Number(p.z).toFixed(2)}`));
+    assert.equal(spawnKeys.size, 10, "5v5 10명 스폰 좌표 고유");
     const carrier = gs.state.players.find(p => p.hasSpike);
     assert(carrier && carrier.team === "red", "공격(레드) 캐리어 보유");
     ok("혼자 시작 → 5v5 & 캐리어 배정");
@@ -147,6 +149,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const bots2 = gcs.state.players.filter(p => p.id.startsWith("bot-"));
     assert.equal(bots2.length, 9, "봇 9명");
     assert.equal(gcs.state.players.filter(p => p.team === "blue").length, 5, "블루 5명(전원 봇)");
+    const soloSpawnKeys = new Set(gcs.state.players.map(p => `${Number(p.x).toFixed(2)},${Number(p.z).toFixed(2)}`));
+    assert.equal(soloSpawnKeys.size, 10, "솔로 5v5 봇 스폰 좌표 고유");
     ok("혼자 시작 → 5v5 봇 구성");
 
     c.emit("lobby:leave");
