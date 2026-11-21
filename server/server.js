@@ -47,6 +47,33 @@ app.get("/api/health", (req, res) => {
 
 const ROOMS = new Map();
 
+/* 테스트 서버에서만 켜지는 결정론적 훅 (운영 환경에서는 비활성) */
+if (process.env.SHOOTER_TEST_HOOKS === "1") {
+  app.post("/api/test/charge-ult", (req, res) => {
+    let charged = 0;
+    for (const room of ROOMS.values()) {
+      if (!room.match) continue;
+      for (const p of room.match._playerMap.values()) {
+        p.ultCharge = 100;
+        charged++;
+      }
+    }
+    res.json({ ok: true, charged });
+  });
+  app.get("/api/test/state", (req, res) => {
+    res.json([...ROOMS.values()].map(room => ({
+      roomId: room.id,
+      status: room.status,
+      phase: room.match ? room.match.phase : null,
+      pendingUlts: room.match ? room.match.pendingUlts.map(pu => ({ x: pu.x, z: pu.z, t: pu.t })) : [],
+      players: room.match ? [...room.match._playerMap.values()].map(p => ({
+        id: p.id, team: p.team, ultCharge: p.ultCharge,
+        smokeCd: Math.max(0, p.smokeReadyAt - room.match._now()),
+      })) : [],
+    })));
+  });
+}
+
 function createRoomId() {
   let id;
   do { id = Math.random().toString(36).slice(2, 6).toUpperCase(); } while (ROOMS.has(id));

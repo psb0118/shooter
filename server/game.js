@@ -1191,6 +1191,7 @@ function createMatch(roomId, opts) {
 
     snapshot() {
       const players = [];
+      const now = match._now();
       for (const [, p] of match._playerMap) {
         players.push({
           id: p.id, nickname: p.nickname, team: p.team, playerColor: p.playerColor,
@@ -1209,9 +1210,9 @@ function createMatch(roomId, opts) {
           defusing: p.defusing,
           sprinting: p.keys.shift && (p.keys.w || p.keys.a || p.keys.s || p.keys.d),
           ultCharge: p.ultCharge,
+          smokeCd: Math.max(0, p.smokeReadyAt - now),
         });
       }
-      const now = match._now();
       const smokes = match.smokes.filter(sm => now - sm.born < sm.dur).map(sm => ({ id: sm.id, x: sm.x, z: sm.z, r: sm.r, born: sm.born, dur: sm.dur }));
       return {
         t: match.tickCount,

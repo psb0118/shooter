@@ -138,7 +138,7 @@
   <div id="pause" class="overlay paused hidden">
     <div class="pause-box">
       <h3 class="pause-title">일시정지 · 설정</h3>
-      <p class="pause-sub">ESC로 열고 닫기 · 변경은 즉시 적용</p>
+      <p class="pause-sub">ESC / ⚙로 열고 닫기 · 변경은 즉시 적용</p>
 
       <div class="setting-row">
         <label>마우스 감도</label>
@@ -150,6 +150,49 @@
       <div class="setting-row">
         <label>마우스 세로 반전</label>
         <label class="switch"><input type="checkbox" id="set-invy" /><span class="slider"></span></label>
+      </div>
+
+      <div class="setting-section-title">MOBILE CONTROL</div>
+      <div class="setting-row">
+        <label>왼손 모드</label>
+        <label class="switch"><input type="checkbox" id="set-lefty" /><span class="slider"></span></label>
+      </div>
+      <div class="setting-row">
+        <label>버튼 크기</label>
+        <div class="setting-input">
+          <input type="range" id="set-btn-scale" min="0.8" max="1.3" step="0.05" value="1" />
+          <span id="set-btn-scale-val">1.00x</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>버튼 투명도</label>
+        <div class="setting-input">
+          <input type="range" id="set-btn-opacity" min="0.35" max="1" step="0.05" value="0.9" />
+          <span id="set-btn-opacity-val">90%</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>버튼 간격</label>
+        <div class="setting-input">
+          <input type="range" id="set-btn-gap" min="0" max="18" step="2" value="0" />
+          <span id="set-btn-gap-val">0px</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>모바일 조준 보조</label>
+        <div class="setting-input">
+          <input type="range" id="set-aim-assist" min="0" max="1" step="0.05" value="0.25" />
+          <span id="set-aim-assist-val">25%</span>
+        </div>
+      </div>
+
+      <div class="setting-section-title">WEAPON SENSITIVITY</div>
+      <div class="weapon-sens-list">
+        <div class="weapon-sens-row"><span>PISTOL</span><input type="range" id="set-wsens-pistol" min="0.4" max="2" step="0.05" value="1" /><b id="set-wsens-pistol-val">1.00x</b></div>
+        <div class="weapon-sens-row"><span>SMG</span><input type="range" id="set-wsens-smg" min="0.4" max="2" step="0.05" value="1" /><b id="set-wsens-smg-val">1.00x</b></div>
+        <div class="weapon-sens-row"><span>AR</span><input type="range" id="set-wsens-ar" min="0.4" max="2" step="0.05" value="1" /><b id="set-wsens-ar-val">1.00x</b></div>
+        <div class="weapon-sens-row"><span>SNIPER</span><input type="range" id="set-wsens-sr" min="0.4" max="2" step="0.05" value="1" /><b id="set-wsens-sr-val">1.00x</b></div>
+        <div class="weapon-sens-row"><span>SHOTGUN</span><input type="range" id="set-wsens-sg" min="0.4" max="2" step="0.05" value="1" /><b id="set-wsens-sg-val">1.00x</b></div>
       </div>
 
       <div class="setting-row keys">
@@ -193,6 +236,7 @@
 
   <!-- ==================== 모바일 터치 컨트롤 ==================== -->
   <div id="touch-controls" class="hidden">
+    <div id="btn-menu" class="btn-control" aria-label="설정">⚙</div>
     <div id="joy-base">
       <div id="joy-knob"></div>
     </div>
@@ -202,9 +246,11 @@
     <div id="btn-fire" class="btn-control">🔫</div>
     <div id="btn-smoke" class="btn-control btn-skill" aria-label="연막 (Q)">
       <span class="btn-skill-key">Q</span><span class="btn-skill-name">연막</span>
+      <span id="btn-smoke-cd" class="btn-skill-cd" aria-hidden="true"></span>
     </div>
     <div id="btn-ult" class="btn-control btn-skill" aria-label="궁극기 (X)">
       <span class="btn-skill-key">X</span><span class="btn-skill-name">궁극기</span>
+      <span id="btn-ult-cd" class="btn-skill-cd" aria-hidden="true"></span>
     </div>
   </div>
 

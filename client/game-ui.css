@@ -310,13 +310,14 @@
   #weapon-hud { min-width: 150px; right: 14px; }
   #ammo { font-size: 26px; }
   #skill-hud { bottom: 330px; }
-  #btn-smoke { right: 82px; bottom: 260px; }
-  #btn-ult { right: 18px; bottom: 260px; }
-  #btn-fire { right: 20px; bottom: 100px; }
-  #btn-reload { right: 26px; bottom: 190px; }
-  #btn-swap { right: 106px; bottom: 110px; }
-  #btn-interact { right: 106px; bottom: 190px; }
-  #joy-base { bottom: 120px; }
+  #btn-smoke { right: calc(82px + var(--safe-r) + var(--ctl-gap)); bottom: calc(260px + var(--safe-b)); }
+  #btn-ult { right: calc(18px + var(--safe-r)); bottom: calc(260px + var(--safe-b)); }
+  #btn-fire { right: calc(20px + var(--safe-r)); bottom: calc(100px + var(--safe-b)); }
+  #btn-reload { right: calc(26px + var(--safe-r)); bottom: calc(190px + var(--safe-b)); }
+  #btn-swap { right: calc(106px + var(--safe-r) + var(--ctl-gap)); bottom: calc(110px + var(--safe-b)); }
+  #btn-interact { right: calc(106px + var(--safe-r) + var(--ctl-gap)); bottom: calc(190px + var(--safe-b)); }
+  #btn-menu { top: calc(62px + var(--safe-t)); left: calc(18px + var(--safe-l)); }
+  #joy-base { left: calc(30px + var(--safe-l)); bottom: calc(120px + var(--safe-b)); }
   .ws-box { width: 94vw; padding: 18px 18px 14px; }
   .ws-box h2 { font-size: 24px; letter-spacing: 3px; }
   .ws-wallet b { font-size: 22px; }
@@ -324,3 +325,5 @@
   .ws-desc { min-height: 0; }
   .ws-foot { font-size: 7px; }
 }
+
+body.lefty-ui #skill-hud { left: 18px; right: auto; }

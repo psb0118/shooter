@@ -60,6 +60,7 @@ const state = {
   vx: 0, vz: 0, vy: 0,
   prevSpace: false,
   ultCharge: 0,
+  smokeCd: 0,
   map: null,
   mapId: "center",
   weapons: {},
@@ -1050,7 +1051,7 @@ function interactTarget() {
 function myIsCarrier() { return state.spike.carrierId === state.myId; }
 
 function useSmoke() {
-  if (state.phase !== "combat" || !state.alive || buyUIOpen()) return false;
+  if (state.phase !== "combat" || !state.alive || state.smokeCd > 0 || buyUIOpen()) return false;
   socket.emit("game:skill", { type: "smoke" });
   Sfx.switchW();
   return true;
@@ -1156,17 +1157,52 @@ function resetControls() {
 
 /* ================= 설정 (ESC 메뉴) ================= */
 
-const SETTINGS = Object.assign(
-  { sens: 1, invertY: false },
-  JSON.parse(localStorage.getItem("shooter_settings") || "null") || {}
-);
+const DEFAULT_SETTINGS = {
+  sens: 1, invertY: false,
+  lefty: false, buttonScale: 1, buttonOpacity: 0.9, buttonGap: 0,
+  aimAssist: 0.25,
+  weaponSens: { pistol: 1, smg: 1, ar: 1, sr: 1, sg: 1 },
+};
+const WEAPON_SENS_KEYS = ["pistol", "smg", "ar", "sr", "sg"];
+const savedSettings = JSON.parse(localStorage.getItem("shooter_settings") || "null") || {};
+const SETTINGS = Object.assign({}, DEFAULT_SETTINGS, savedSettings, {
+  weaponSens: Object.assign({}, DEFAULT_SETTINGS.weaponSens, savedSettings.weaponSens || {}),
+});
 function saveSettings() {
   localStorage.setItem("shooter_settings", JSON.stringify(SETTINGS));
+}
+function weaponSens(id) { return SETTINGS.weaponSens[id] || 1; }
+function lookSensitivity() { return SETTINGS.sens * weaponSens(state.myWeapon); }
+function applyControlSettings() {
+  const tc = $("#touch-controls");
+  if (tc) {
+    tc.style.setProperty("--ctl-scale", String(SETTINGS.buttonScale));
+    tc.style.setProperty("--ctl-opacity", String(SETTINGS.buttonOpacity));
+    tc.style.setProperty("--ctl-gap", SETTINGS.buttonGap + "px");
+    tc.classList.toggle("lefty", !!SETTINGS.lefty);
+  }
+  document.body.classList.toggle("lefty-ui", !!SETTINGS.lefty);
 }
 function syncSettingsUI() {
   $("#set-sens").value = SETTINGS.sens;
   $("#set-sens-val").textContent = SETTINGS.sens.toFixed(2) + "x";
   $("#set-invy").checked = SETTINGS.invertY;
+  $("#set-lefty").checked = SETTINGS.lefty;
+  $("#set-btn-scale").value = SETTINGS.buttonScale;
+  $("#set-btn-scale-val").textContent = SETTINGS.buttonScale.toFixed(2) + "x";
+  $("#set-btn-opacity").value = SETTINGS.buttonOpacity;
+  $("#set-btn-opacity-val").textContent = Math.round(SETTINGS.buttonOpacity * 100) + "%";
+  $("#set-btn-gap").value = SETTINGS.buttonGap;
+  $("#set-btn-gap-val").textContent = SETTINGS.buttonGap + "px";
+  $("#set-aim-assist").value = SETTINGS.aimAssist;
+  $("#set-aim-assist-val").textContent = Math.round(SETTINGS.aimAssist * 100) + "%";
+  for (const key of WEAPON_SENS_KEYS) {
+    const el = $(`#set-wsens-${key}`);
+    const val = $(`#set-wsens-${key}-val`);
+    if (el) el.value = weaponSens(key);
+    if (val) val.textContent = weaponSens(key).toFixed(2) + "x";
+  }
+  applyControlSettings();
 }
 $("#set-sens").addEventListener("input", (e) => {
   SETTINGS.sens = parseFloat(e.target.value) || 1;
@@ -1177,20 +1213,68 @@ $("#set-invy").addEventListener("change", (e) => {
   SETTINGS.invertY = e.target.checked;
   saveSettings();
 });
+$("#set-lefty").addEventListener("change", (e) => {
+  SETTINGS.lefty = e.target.checked;
+  applyControlSettings();
+  saveSettings();
+});
+$("#set-btn-scale").addEventListener("input", (e) => {
+  SETTINGS.buttonScale = parseFloat(e.target.value) || 1;
+  $("#set-btn-scale-val").textContent = SETTINGS.buttonScale.toFixed(2) + "x";
+  applyControlSettings();
+  saveSettings();
+});
+$("#set-btn-opacity").addEventListener("input", (e) => {
+  SETTINGS.buttonOpacity = parseFloat(e.target.value) || 0.9;
+  $("#set-btn-opacity-val").textContent = Math.round(SETTINGS.buttonOpacity * 100) + "%";
+  applyControlSettings();
+  saveSettings();
+});
+$("#set-btn-gap").addEventListener("input", (e) => {
+  SETTINGS.buttonGap = parseFloat(e.target.value) || 0;
+  $("#set-btn-gap-val").textContent = SETTINGS.buttonGap + "px";
+  applyControlSettings();
+  saveSettings();
+});
+$("#set-aim-assist").addEventListener("input", (e) => {
+  SETTINGS.aimAssist = parseFloat(e.target.value) || 0;
+  $("#set-aim-assist-val").textContent = Math.round(SETTINGS.aimAssist * 100) + "%";
+  saveSettings();
+});
+for (const key of WEAPON_SENS_KEYS) {
+  const el = $(`#set-wsens-${key}`);
+  if (!el) continue;
+  el.addEventListener("input", (e) => {
+    SETTINGS.weaponSens[key] = parseFloat(e.target.value) || 1;
+    const val = $(`#set-wsens-${key}-val`);
+    if (val) val.textContent = SETTINGS.weaponSens[key].toFixed(2) + "x";
+    saveSettings();
+  });
+}
+applyControlSettings();
 $("#btn-resume").addEventListener("click", () => {
   $("#pause").classList.add("hidden");
-  tryLock();
+  state.uiLock = false;
+  if (!TOUCH) tryLock();
 });
 $("#btn-leave").addEventListener("click", () => {
   $("#pause").classList.add("hidden");
+  state.uiLock = false;
   socket.emit("lobby:leave");
   enterLobbyUI();
 });
+function openPauseSettings() {
+  if (!state.inGame) return;
+  syncSettingsUI();
+  state.uiLock = true;
+  $("#pause").classList.remove("hidden");
+}
 
 document.addEventListener("mousemove", (e) => {
   if (!state.inGame || !pointerLocked()) return;
-  state.yaw -= e.movementX * SENS * SETTINGS.sens;
-  state.pitch = clamp(state.pitch + e.movementY * SENS * SETTINGS.sens * (SETTINGS.invertY ? 1 : -1), -1.52, 1.52);
+  const sens = lookSensitivity();
+  state.yaw -= e.movementX * SENS * sens;
+  state.pitch = clamp(state.pitch + e.movementY * SENS * sens * (SETTINGS.invertY ? 1 : -1), -1.52, 1.52);
   const tau = Math.PI * 2;
   state.yaw = ((state.yaw % tau) + tau) % tau;
 });
@@ -1259,6 +1343,7 @@ document.addEventListener("touchstart", (e) => {
         else if (id === "btn-interact") startInteract(true);
         else if (id === "btn-smoke") useSmoke();
         else if (id === "btn-ult") useUlt();
+        else if (id === "btn-menu") openPauseSettings();
         btnTimer.set(t.identifier, id);
       } else {
         // 나머지 화면 영역 → 스와이프로 시야 회전
@@ -1277,8 +1362,9 @@ document.addEventListener("touchmove", (e) => {
       const dx = t.clientX - look.lx;
       const dy = t.clientY - look.ly;
       look.lx = t.clientX; look.ly = t.clientY;
-      state.yaw -= dx * TOUCH_SENS * SETTINGS.sens;
-      state.pitch = clamp(state.pitch + dy * TOUCH_SENS * SETTINGS.sens * (SETTINGS.invertY ? 1 : -1), -1.52, 1.52);
+      const sens = lookSensitivity();
+      state.yaw -= dx * TOUCH_SENS * sens;
+      state.pitch = clamp(state.pitch + dy * TOUCH_SENS * sens * (SETTINGS.invertY ? 1 : -1), -1.52, 1.52);
     }
   }
 }, { passive: false });
@@ -1449,7 +1535,9 @@ const ui = {
     const uc = $("#skill-ult-charge");
     if (uc) uc.textContent = ultPct >= 100 ? "궁극기!" : ultPct + "%";
     if (ultEl) ultEl.classList.toggle("ready", ultPct >= 100);
-    const smokeReady = state.alive && state.phase === "combat";
+    const combatReady = state.alive && state.phase === "combat";
+    const smokeCd = Math.max(0, state.smokeCd || 0);
+    const smokeReady = combatReady && smokeCd <= 0;
     const smokeEl = $("#skill-smoke");
     if (smokeEl) {
       smokeEl.classList.toggle("ready", smokeReady);
@@ -1457,14 +1545,25 @@ const ui = {
     }
     const smokeBtn = $("#btn-smoke");
     if (smokeBtn) {
+      const smokeTotal = (state.characters[state.myChar]?.smokeCd) || 22;
       smokeBtn.classList.toggle("ready", smokeReady);
+      smokeBtn.classList.toggle("cooling", smokeCd > 0);
+      smokeBtn.style.setProperty("--cd", Math.min(100, (smokeCd / smokeTotal) * 100).toFixed(1) + "%");
       smokeBtn.setAttribute("aria-disabled", String(!smokeReady));
+      smokeBtn.setAttribute("aria-label", smokeCd > 0 ? `연막 재사용 ${Math.ceil(smokeCd)}초` : "연막 (Q)");
+      const smokeCdEl = $("#btn-smoke-cd");
+      if (smokeCdEl) smokeCdEl.textContent = smokeCd > 0 ? Math.ceil(smokeCd) + "s" : "";
     }
     const ultBtn = $("#btn-ult");
     if (ultBtn) {
-      const ultReady = smokeReady && ultPct >= 100;
+      const ultReady = combatReady && ultPct >= 100;
       ultBtn.classList.toggle("ready", ultReady);
+      ultBtn.classList.toggle("cooling", !ultReady);
+      ultBtn.style.setProperty("--cd", (100 - ultPct).toFixed(1) + "%");
       ultBtn.setAttribute("aria-disabled", String(!ultReady));
+      ultBtn.setAttribute("aria-label", ultReady ? "궁극기 (X) 준비됨" : `궁극기 충전 ${ultPct}%`);
+      const ultCdEl = $("#btn-ult-cd");
+      if (ultCdEl) ultCdEl.textContent = ultReady ? "" : ultPct + "%";
     }
     // 스코프 오버레이 상태 동기화
     const scopeOvr = $("#scope-overlay");
@@ -1828,6 +1927,7 @@ socket.on("game:state", (snap) => {
     state.deaths = mine.deaths;
     state.myTeam = mine.team || state.myTeam;
     state.ultCharge = typeof mine.ultCharge === "number" ? mine.ultCharge : state.ultCharge;
+    state.smokeCd = typeof mine.smokeCd === "number" ? mine.smokeCd : 0;
     if (mine.hasSpike) state.spike.carrierId = mine.id;
   }
 
@@ -1854,7 +1954,7 @@ socket.on("game:state", (snap) => {
       mesh.group.position.set(p.x, 0, p.z);
       mesh.group.position.y = p.y || 0;
       mesh.group.rotation.y = p.yaw;
-      ent = { group: mesh.group, hpBar: mesh.hpBar, spikeSpr: mesh.spikeSpr, name: p.nickname, target: { x: p.x, y: p.y || 0, z: p.z, yaw: p.yaw, hp: p.hp }, px: p.x, pz: p.z, pt: snap.t, vx: 0, vz: 0 };
+      ent = { group: mesh.group, hpBar: mesh.hpBar, spikeSpr: mesh.spikeSpr, name: p.nickname, team: p.team, alive: p.alive !== false, target: { x: p.x, y: p.y || 0, z: p.z, yaw: p.yaw, hp: p.hp }, px: p.x, pz: p.z, pt: snap.t, vx: 0, vz: 0 };
       state.players.set(p.id, ent);
     }
     if (ent.spikeSpr) ent.spikeSpr.visible = !!p.hasSpike && p.alive !== false;
@@ -1872,6 +1972,7 @@ socket.on("game:state", (snap) => {
     ent.target.yaw = p.yaw;
     ent.target.hp = p.hp;
     ent.kills = p.kills || 0; ent.deaths = p.deaths || 0; ent.assists = p.assists || 0;
+    ent.alive = p.alive !== false;
     ent.hpBar.draw(p, null);
   }
   for (const [id, ent] of state.players) {
@@ -2150,6 +2251,8 @@ function animate(now) {
 
   if (!state.inGame) { renderer.render(scene, camera); return; }
 
+  if (TOUCH) applyAimAssist(dt);
+
   /* 카메라 */
   if (state.alive && (pointerLocked() || TOUCH)) {
     // 로컬 예측 충돌
@@ -2295,6 +2398,60 @@ function angDiff(a, b) {
   if (d > Math.PI) d -= Math.PI * 2;
   if (d < -Math.PI) d += Math.PI * 2;
   return d;
+}
+
+function aimAssistLineClear(x1, z1, x2, z2) {
+  if (!state.map || !state.map.obstacles) return true;
+  const dx = x2 - x1, dz = z2 - z1;
+  for (const b of state.map.obstacles) {
+    const minX = b.x - b.w / 2, maxX = b.x + b.w / 2;
+    const minZ = b.z - b.d / 2, maxZ = b.z + b.d / 2;
+    let t0 = 0, t1 = 1;
+    if (Math.abs(dx) < 1e-6) {
+      if (x1 < minX || x1 > maxX) continue;
+    } else {
+      let ta = (minX - x1) / dx, tb = (maxX - x1) / dx;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+      if (t0 > t1) continue;
+    }
+    if (Math.abs(dz) < 1e-6) {
+      if (z1 < minZ || z1 > maxZ) continue;
+    } else {
+      let ta = (minZ - z1) / dz, tb = (maxZ - z1) / dz;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+      if (t0 > t1) continue;
+    }
+    if (t1 > 0.04 && t0 < 0.96) return false;
+  }
+  return true;
+}
+
+function applyAimAssist(dt) {
+  if (!SETTINGS.aimAssist || !state.inGame || !state.alive || state.phase !== "combat" || state.uiLock || buyUIOpen()) return;
+  if (!state.firing && !look.active) return;
+  let best = null;
+  for (const ent of state.players.values()) {
+    if (!ent.alive || ent.team === state.myTeam) continue;
+    const dx = ent.group.position.x - state.x;
+    const dz = ent.group.position.z - state.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 2 || dist > 30) continue;
+    const targetYaw = Math.atan2(dx, dz);
+    const diff = Math.abs(angDiff(targetYaw, state.yaw));
+    if (diff > 0.18) continue;
+    if (!aimAssistLineClear(state.x, state.z, ent.group.position.x, ent.group.position.z)) continue;
+    const targetPitch = Math.atan2((ent.group.position.y + 1.1) - (state.y + 1.62), dist);
+    if (Math.abs(targetPitch - state.pitch) > 0.28) continue;
+    if (!best || diff < best.diff) best = { yaw: targetYaw, pitch: targetPitch, diff };
+  }
+  if (!best) return;
+  const amount = Math.min(0.28, SETTINGS.aimAssist * dt * 4.5);
+  state.yaw += angDiff(best.yaw, state.yaw) * amount;
+  state.pitch = clamp(state.pitch + (best.pitch - state.pitch) * amount, -1.52, 1.52);
+  const tau = Math.PI * 2;
+  state.yaw = ((state.yaw % tau) + tau) % tau;
 }
 
 function clearTracers() {
