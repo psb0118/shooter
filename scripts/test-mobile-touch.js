@@ -1,10 +1,10 @@
 "use strict";
 
 /* =========================================================
-   scripts/test-mobile-touch.js — 실제 모바일 터치 Q/X 회귀 테스트
+   scripts/test-mobile-touch.js — 실제 모바일 터치 회귀 테스트
    실행: node scripts/test-mobile-touch.js
    - 테스트 서버에서만 켜지는 /api/test/* 훅으로 궁극기 충전 100을 만든다.
-   - 390x844 터치 뷰포트에서 Q 연막 생성과 X 낙뢰 예약/발동을 검증한다.
+   - 390x844/844x390 터치 뷰포트에서 로비·모달 터치 스크롤과 Q/X 스킬을 검증한다.
 ========================================================= */
 
 const { spawn } = require("child_process");
@@ -14,6 +14,17 @@ const puppeteer = require("puppeteer");
 const PORT = 3333;
 const URL = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function touchSwipe(cdp, x, fromY, toY, id = 1) {
+  const step = toY < fromY ? -40 : 40;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y: fromY, id }] });
+  for (let y = fromY + step; step < 0 ? y >= toY : y <= toY; y += step) {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y, id }] });
+    await sleep(25);
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await sleep(350);
+}
 
 async function waitForServer() {
   for (let i = 0; i < 40; i++) {
@@ -80,17 +91,12 @@ async function roomState() {
 
     const cdp = await page.createCDPSession();
     await page.evaluate(() => { document.querySelector(".lobby-shell").scrollTop = 0; });
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 200, y: 720, id: 1 }] });
-    for (const y of [640, 560, 480, 400, 320]) {
-      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 200, y, id: 1 }] });
-      await sleep(30);
-    }
-    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-    await sleep(350);
+    await touchSwipe(cdp, 200, 720, 320, 1);
     assert((await page.evaluate(() => document.querySelector(".lobby-shell").scrollTop)) > 0, "로비 실제 터치 스크롤");
 
     /* 가로 모드에서도 PC 2열 레이아웃이 아니라 모바일 단일 컬럼인지 확인 */
     await page.setViewport({ width: 844, height: 390, isMobile: true, hasTouch: true });
+    await page.evaluate(() => { document.querySelector(".lobby-shell").scrollTop = 0; });
     await sleep(150);
     const landscape = await page.evaluate(() => ({
       mobileClass: document.body.classList.contains("mobile-ui"),
@@ -101,9 +107,11 @@ async function roomState() {
     assert(landscape.mobileClass, "가로 모드 모바일 UI 유지");
     assert.equal(landscape.display, "flex", "가로 모드 모바일 단일 컬럼");
     assert(landscape.scrollHeight > landscape.clientHeight, "가로 모드 로비 스크롤 가능");
-    await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
-    await sleep(150);
+
+    /* 가로 로비에서도 실제 터치 스크롤이 동작하는지 확인 */
     await page.evaluate(() => { document.querySelector(".lobby-shell").scrollTop = 0; });
+    await touchSwipe(cdp, 420, 300, 80, 2);
+    assert((await page.evaluate(() => document.querySelector(".lobby-shell").scrollTop)) > 0, "가로 모드 로비 실제 터치 스크롤");
     console.log("  ✓ 모바일 로비 실제 터치 스크롤/가로 레이아웃");
 
     await page.type("#nickname", "모바일테스터");
@@ -112,9 +120,51 @@ async function roomState() {
     await page.click("#btn-start");
     await page.waitForSelector("#hud:not(.hidden)", { timeout: 15000 });
     await page.waitForSelector("#weapon-select:not(.hidden)", { timeout: 8000 });
-    assert(await page.$("#ws-close"), "모바일 구매 화면 닫기 버튼 존재");
-    await page.click("#ws-close");
+    const buyLayout = await page.evaluate(() => {
+      const box = document.querySelector(".ws-box");
+      return {
+        scrollHeight: box.scrollHeight,
+        clientHeight: box.clientHeight,
+        modal: document.body.classList.contains("modal-open"),
+        close: !!document.querySelector("#ws-close"),
+      };
+    });
+    assert(buyLayout.close, "모바일 구매 화면 닫기 버튼 존재");
+    assert(buyLayout.modal, "구매 모달 터치 스크롤 상태 활성화");
+    assert(buyLayout.scrollHeight > buyLayout.clientHeight, "가로 모드 구매 화면 스크롤 영역");
+    await page.evaluate(() => { document.querySelector(".ws-box").scrollTop = 0; });
+    await touchSwipe(cdp, 420, 300, 80, 3);
+    assert((await page.evaluate(() => document.querySelector(".ws-box").scrollTop)) > 0, "구매 모달 실제 터치 스크롤");
+    await page.evaluate(() => document.querySelector("#ws-close").click());
     await page.waitForFunction(() => document.querySelector("#weapon-select").classList.contains("hidden"), { timeout: 2000 });
+    console.log("  ✓ 구매 모달 실제 터치 스크롤/닫기");
+
+    /* 설정 모달도 실제 터치로 스크롤되는지 확인 */
+    const menuBox = await page.evaluate(() => {
+      const r = document.querySelector("#btn-menu").getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await page.touchscreen.tap(menuBox.x, menuBox.y);
+    await page.waitForSelector("#pause:not(.hidden)", { timeout: 3000 });
+    const pauseLayout = await page.evaluate(() => {
+      const box = document.querySelector(".pause-box");
+      return {
+        scrollHeight: box.scrollHeight,
+        clientHeight: box.clientHeight,
+        modal: document.body.classList.contains("modal-open"),
+        keysHidden: getComputedStyle(document.querySelector(".setting-row.keys")).display === "none",
+      };
+    });
+    assert(pauseLayout.modal, "설정 모달 터치 스크롤 상태 활성화");
+    assert(pauseLayout.scrollHeight > pauseLayout.clientHeight, "가로 모드 설정 화면 스크롤 영역");
+    assert(pauseLayout.keysHidden, "모바일 설정에서 PC 키 안내 숨김");
+    await page.evaluate(() => { document.querySelector(".pause-box").scrollTop = 0; });
+    await touchSwipe(cdp, 420, 300, 80, 4);
+    assert((await page.evaluate(() => document.querySelector(".pause-box").scrollTop)) > 0, "설정 모달 실제 터치 스크롤");
+    await page.evaluate(() => document.querySelector("#btn-resume").click());
+    await page.waitForSelector("#pause.hidden", { timeout: 2000 });
+    console.log("  ✓ 설정 모달 실제 터치 스크롤/재개");
+
     await page.waitForFunction(() => window.__s && window.__s().phase === "combat", { timeout: 25000 });
 
     const myId = await page.evaluate(() => window.__s().myId);
@@ -157,7 +207,7 @@ async function roomState() {
     assert.deepEqual(errors, [], "페이지 오류 없음");
     console.log("  ✓ X 실제 터치 → 서버 충전 100/낙뢰 예약/처리 완료");
 
-    console.log("\n[mobile-touch] 3개 테스트 통과");
+    console.log("\n[mobile-touch] 5개 테스트 통과");
   } catch (err) {
     console.error("\n[mobile-touch] 테스트 실패:", err.message);
     process.exitCode = 1;
