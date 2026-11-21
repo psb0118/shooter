@@ -181,61 +181,105 @@ scene.fog = new THREE.Fog(0x9db4d6, 90, 240);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
 camera.rotation.order = "YXZ";
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+if (THREE.ACESFilmicToneMapping) {
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.88;
+}
 container.appendChild(renderer.domElement);
 
 const hemiLight = new THREE.HemisphereLight(0xcfe4ff, 0x667799, 1.0);
 scene.add(hemiLight);
-const sun = new THREE.DirectionalLight(0xffffff, 1.15);
+const ambientLight = new THREE.AmbientLight(0x93b4dd, 0.2);
+scene.add(ambientLight);
+const sun = new THREE.DirectionalLight(0xfff3e0, 1.2);
 sun.position.set(40, 90, 25);
 scene.add(sun);
+const fillLight = new THREE.DirectionalLight(0x7fb6ff, 0.3);
+fillLight.position.set(-60, 45, -40);
+scene.add(fillLight);
 
 /* ------------- 뷰모델 (1인칭 총 — 무기별 실루엣/색 변화) ------------- */
 
 const VM_LOOK = {
-  pistol: { color: 0x9aa0b0, w: 0.07,  len: 0.34, magLen: 0.12 },
-  smg:    { color: 0x4f86d8, w: 0.085, len: 0.5,  magLen: 0.18 },
-  ar:     { color: 0x36a77a, w: 0.09,  len: 0.62, magLen: 0.22 },
-  sr:     { color: 0xa25fd0, w: 0.08,  len: 0.82, magLen: 0.2 },
-  sg:     { color: 0xd08a3c, w: 0.12,  len: 0.52, magLen: 0.24 },
+  pistol: { color: 0x9aa0b0, accent: 0x5fe7ff, w: 0.07,  len: 0.34, magLen: 0.12 },
+  smg:    { color: 0x4f86d8, accent: 0x5fe7ff, w: 0.085, len: 0.5,  magLen: 0.18 },
+  ar:     { color: 0x36a77a, accent: 0x7dffc4, w: 0.09,  len: 0.62, magLen: 0.22 },
+  sr:     { color: 0xa25fd0, accent: 0xffd75f, w: 0.08,  len: 0.82, magLen: 0.2 },
+  sg:     { color: 0xd08a3c, accent: 0xffb36b, w: 0.12,  len: 0.52, magLen: 0.24 },
 };
 
 let viewmodel = null;
 
 function clearViewModel() {
   if (!viewmodel) return;
-  while (viewmodel.children.length) {
-    const c = viewmodel.children[0];
+  for (const c of [...viewmodel.children]) {
     viewmodel.remove(c);
-    if (c.geometry) c.geometry.dispose();
-    if (c.material) {
-      if (Array.isArray(c.material)) c.material.forEach((m) => m.dispose());
-      else c.material.dispose();
-    }
+    c.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) {
+        if (Array.isArray(o.material)) o.material.forEach((m) => m.dispose());
+        else o.material.dispose();
+      }
+    });
   }
 }
 
 function buildViewModel(weaponId) {
   clearViewModel();
   const spec = VM_LOOK[weaponId] || VM_LOOK.pistol;
-  const mat = new THREE.MeshLambertMaterial({ color: spec.color });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x1c1f2a });
+  const bodyMat = new THREE.MeshStandardMaterial({ color: spec.color, roughness: 0.42, metalness: 0.55 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a3646, roughness: 0.5, metalness: 0.55 });
+  const metalMat = new THREE.MeshStandardMaterial({ color: 0x8a97a8, roughness: 0.32, metalness: 0.82 });
+  const accentMat = new THREE.MeshBasicMaterial({ color: spec.accent || 0x5fe7ff });
   const L = spec.len;
+  const box = (w, h, d, mat) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const cyl = (r, h, mat) => new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 10), mat);
 
-  const body = new THREE.Mesh(new THREE.BoxGeometry(spec.w, 0.13, L), mat);
-  body.position.set(0, 0, -L / 2 + 0.08);
-  const grip = new THREE.Mesh(new THREE.BoxGeometry(spec.w * 0.82, 0.17, 0.14), dark);
-  grip.position.set(0, -0.15, 0.07);
-  const mag = new THREE.Mesh(new THREE.BoxGeometry(spec.w * 0.78, 0.15, spec.magLen), dark);
-  mag.position.set(0, -0.045, -0.05);
-  viewmodel.add(body, grip, mag);
+  const receiver = box(spec.w, 0.11, L * 0.55, bodyMat);
+  receiver.position.set(0, 0, -L * 0.26);
+  const handguard = box(spec.w * 0.9, 0.085, L * 0.3, darkMat);
+  handguard.position.set(0, -0.005, -L * 0.52);
+  const grip = box(spec.w * 0.75, 0.16, 0.12, darkMat);
+  grip.position.set(0, -0.14, 0.03);
+  grip.rotation.x = 0.28;
+  const mag = box(spec.w * 0.7, 0.18, 0.1, metalMat);
+  mag.position.set(0, -0.13, -L * 0.18);
+  mag.rotation.x = 0.12;
+  const barrel = cyl(0.022, L * 0.5, metalMat);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.025, -L * 0.82);
+  const muzzle = cyl(0.024, 0.04, accentMat);
+  muzzle.rotation.x = Math.PI / 2;
+  muzzle.position.set(0, 0.025, -L * 1.03);
+  const sight = box(0.05, 0.05, 0.09, darkMat);
+  sight.position.set(0, 0.075, -L * 0.16);
+  const dot = box(0.016, 0.016, 0.016, accentMat);
+  dot.position.set(0, 0.104, -L * 0.16);
+  const rail = box(spec.w * 0.55, 0.024, L * 0.4, metalMat);
+  rail.position.set(0, 0.07, -L * 0.26);
+  const strip = box(0.02, 0.026, L * 0.4, accentMat);
+  strip.position.set(spec.w * 0.5 + 0.01, -0.005, -L * 0.3);
+  const handR = box(0.06, 0.09, 0.1, darkMat);
+  handR.position.set(0, -0.12, 0.02);
+  viewmodel.add(receiver, handguard, grip, mag, barrel, muzzle, sight, dot, rail, strip, handR);
+
+  if (L > 0.38) {
+    const stock = box(spec.w * 0.8, 0.13, 0.2, darkMat);
+    stock.position.set(0, -0.015, 0.14);
+    viewmodel.add(stock);
+  }
 
   if (weaponId === "sr") {
-    const scope = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.14, 0.16), dark);
-    scope.position.set(0, 0.07, -0.1);
-    viewmodel.add(scope);
+    const scope = cyl(0.045, 0.18, darkMat);
+    scope.rotation.x = Math.PI / 2;
+    scope.position.set(0, 0.115, -L * 0.2);
+    const lens = cyl(0.036, 0.012, accentMat);
+    lens.rotation.x = Math.PI / 2;
+    lens.position.set(0, 0.115, -L * 0.29);
+    viewmodel.add(scope, lens);
   }
 }
 
@@ -251,8 +295,9 @@ function makeViewModel() {
   if (viewmodel) return viewmodel;
   viewmodel = new THREE.Group();
   // 총을 화면 중앙(조준점)에 정렬 — 오른쪽 어깨 배치 제거
-  viewmodel.position.set(0, -0.16, -0.48);
-  viewmodel.rotation.x = 0.06;
+  viewmodel.position.set(0.28, -0.2, -0.88);
+  viewmodel.rotation.set(0.08, -0.7, 0);
+  viewmodel.scale.setScalar(0.8);
   camera.add(viewmodel);
   scene.add(camera);
   buildViewModel(state.myWeapon || "pistol");
@@ -261,6 +306,51 @@ function makeViewModel() {
 makeViewModel();
 
 /* ------------- 세계 생성 ------------- */
+
+function makeSkyTexture(top, bottom) {
+  const cv = document.createElement("canvas");
+  cv.width = 8; cv.height = 256;
+  const ctx = cv.getContext("2d");
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, "#" + top.getHexString());
+  g.addColorStop(0.58, "#" + bottom.getHexString());
+  g.addColorStop(1, "#" + bottom.clone().multiplyScalar(0.72).getHexString());
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 8, 256);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  if ("SRGBColorSpace" in THREE) tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function makeGroundTexture(base) {
+  const cv = document.createElement("canvas");
+  cv.width = 512; cv.height = 512;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#" + base.getHexString();
+  ctx.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 2200; i++) {
+    const a = Math.random() * 0.055;
+    ctx.fillStyle = Math.random() > 0.5 ? `rgba(255,255,255,${a})` : `rgba(0,0,0,${a})`;
+    const s = 2 + Math.random() * 7;
+    ctx.fillRect(Math.random() * 512, Math.random() * 512, s, s);
+  }
+  ctx.strokeStyle = "rgba(255,255,255,.075)";
+  ctx.lineWidth = 2;
+  for (let i = 0; i <= 512; i += 128) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(512, i); ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(95,231,255,.12)";
+  ctx.lineWidth = 5;
+  ctx.strokeRect(64, 64, 384, 384);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  if ("SRGBColorSpace" in THREE) tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 function buildWorld(map) {
   clearWorldObjects();
@@ -273,11 +363,26 @@ function buildWorld(map) {
   scene.background = skyCol;
   if (scene.fog) scene.fog.color = new THREE.Color(th.fog != null ? th.fog : 0x9db4d6);
   if (hemiLight) { hemiLight.color.set(th.hemiSky != null ? th.hemiSky : 0xcfe4ff); hemiLight.groundColor.set(th.hemiGround != null ? th.hemiGround : 0x667799); }
-  if (sun) sun.intensity = th.sun != null ? th.sun : 1.15;
+  if (sun) sun.intensity = Math.min(1.5, th.sun != null ? th.sun : 1.15);
 
+  // 그라데이션 스카이 돔 — 단조로운 단색 하늘 대신 깊이감 있는 배경
+  const skyTop = skyCol.clone().multiplyScalar(0.38);
+  const skyBottom = skyCol.clone().lerp(new THREE.Color(0xffffff), 0.22);
+  const skyDome = new THREE.Mesh(
+    new THREE.SphereGeometry(360, 24, 14),
+    new THREE.MeshBasicMaterial({ map: makeSkyTexture(skyTop, skyBottom), side: THREE.BackSide, fog: false, depthWrite: false })
+  );
+  skyDome.position.y = 70;
+  skyDome.renderOrder = -10;
+  scene.add(skyDome);
+  state.mapObjects.push(skyDome);
+  if (scene.fog) { scene.fog.near = 70; scene.fog.far = 230; }
+
+  const groundTex = makeGroundTexture(new THREE.Color(th.ground != null ? th.ground : 0x8899ad));
+  groundTex.repeat.set(Math.max(3, Math.round(hs / 9)), Math.max(3, Math.round(hs / 9)));
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(hs * 2, hs * 2),
-    new THREE.MeshLambertMaterial({ color: th.ground != null ? th.ground : 0x8899ad })
+    new THREE.MeshStandardMaterial({ map: groundTex, color: 0xc7d2e0, roughness: 1, metalness: 0 })
   );
   ground.rotation.x = -Math.PI / 2;
   scene.add(ground);
@@ -293,15 +398,25 @@ function buildWorld(map) {
 
   for (const team of ["red", "blue"]) {
     const role = team === "red" ? "attack" : "defend";
+    const col = TEAM_COLOR[team];
     for (const sp of map.spawns[role]) {
       const disc = new THREE.Mesh(
         new THREE.CircleGeometry(1.2, 24),
-        new THREE.MeshLambertMaterial({ color: TEAM_COLOR[team], transparent: true, opacity: 0.25 })
+        new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.18, depthWrite: false })
       );
       disc.rotation.x = -Math.PI / 2;
       disc.position.set(sp.x, 0.02, sp.z);
       scene.add(disc);
       state.mapObjects.push(disc);
+
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(1.16, 1.36, 28),
+        new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(sp.x, 0.028, sp.z);
+      scene.add(ring);
+      state.mapObjects.push(ring);
     }
   }
 
@@ -309,27 +424,50 @@ function buildWorld(map) {
   const baseS = th.obstacleS != null ? th.obstacleS : 0.12;
   const baseL = th.obstacleL != null ? th.obstacleL : 0.22;
   const spread = th.obstacleSpread != null ? th.obstacleSpread : 0.002;
+  const edgeColor = new THREE.Color(th.edge != null ? th.edge : 0x5c6a82).lerp(new THREE.Color(0xffffff), 0.35);
   for (const ob of map.obstacles) {
     const geo = new THREE.BoxGeometry(ob.w, map.wallHeight, ob.d);
     // 각 장애물마다 색상 변화 (다채로운 맵)
-    const h = baseH + (((ob.x * 13 + ob.z * 7) | 0) % 100) * 0.001;
-    const s = baseS + (((ob.z * 11 + ob.x * 3) | 0) % 100) * spread;
-    const l = baseL + (((ob.x + ob.z * 5) | 0) % 100) * (spread * 0.8);
-    const boxMat = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(h, s, l) });
+    const seedH = ((((ob.x * 13 + ob.z * 7) | 0) % 100) + 100) % 100;
+    const seedS = ((((ob.z * 11 + ob.x * 3) | 0) % 100) + 100) % 100;
+    const seedL = ((((ob.x + ob.z * 5) | 0) % 100) + 100) % 100;
+    const h = Math.min(0.95, baseH + seedH * 0.001);
+    const s = Math.max(0.12, Math.min(0.8, baseS + seedS * spread));
+    const l = Math.max(0.27, Math.min(0.62, baseL + seedL * (spread * 0.8) + 0.025));
+    const col = new THREE.Color().setHSL(h, s, l);
+    const boxMat = new THREE.MeshStandardMaterial({
+      color: col, roughness: 0.82, metalness: 0.14,
+      emissive: col.clone().multiplyScalar(0.14), emissiveIntensity: 1,
+    });
     const mesh = new THREE.Mesh(geo, boxMat);
     mesh.position.set(ob.x, map.wallHeight / 2, ob.z);
     scene.add(mesh);
     state.mapObjects.push(mesh);
+
     const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(geo),
-      new THREE.LineBasicMaterial({ color: th.edge != null ? th.edge : 0x5c6a82 })
+      new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: 0.45 })
     );
     edges.position.copy(mesh.position);
     scene.add(edges);
     state.mapObjects.push(edges);
+
+    // 커버 하단 네온 트림 — 사이트 A는 그린, B는 앰버, 나머지는 시안
+    const trimCol = ob.z > 20 && ob.x < 0 ? 0x57d69b : ob.z > 20 && ob.x > 0 ? 0xffa94d : 0x5fe7ff;
+    const trim = new THREE.Mesh(
+      new THREE.BoxGeometry(ob.w + 0.06, 0.05, ob.d + 0.06),
+      new THREE.MeshBasicMaterial({ color: trimCol, transparent: true, opacity: 0.5, depthWrite: false })
+    );
+    trim.position.set(ob.x, 0.035, ob.z);
+    scene.add(trim);
+    state.mapObjects.push(trim);
   }
 
-  const wallMat = new THREE.MeshLambertMaterial({ color: th.wall != null ? th.wall : 0x2b3350, transparent: true, opacity: 0.9 });
+  const wallCol = new THREE.Color(th.wall != null ? th.wall : 0x2b3350);
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: wallCol, roughness: 0.85, metalness: 0.12,
+    emissive: wallCol.clone().multiplyScalar(0.12), emissiveIntensity: 1,
+  });
   const wallGeo = new THREE.BoxGeometry(hs * 2, map.wallHeight + 2, 2);
   const walls = [
     [0, 0, hs, 0],
@@ -345,9 +483,36 @@ function buildWorld(map) {
     state.mapObjects.push(wm);
   }
 
-  // A/B 사이트 표시
+  // 경계 벽 하단 라이트 스트립 + 코너 필라
+  const wallTrimMat = new THREE.MeshBasicMaterial({ color: 0x5fe7ff, transparent: true, opacity: 0.42, depthWrite: false });
+  const trimPieces = [
+    [new THREE.BoxGeometry(hs * 2, 0.07, 0.07), 0, 0.11, hs - 0.06],
+    [new THREE.BoxGeometry(hs * 2, 0.07, 0.07), 0, 0.11, -hs + 0.06],
+    [new THREE.BoxGeometry(0.07, 0.07, hs * 2), hs - 0.06, 0.11, 0],
+    [new THREE.BoxGeometry(0.07, 0.07, hs * 2), -hs + 0.06, 0.11, 0],
+  ];
+  for (const [geo, x, y, z] of trimPieces) {
+    const m = new THREE.Mesh(geo, wallTrimMat);
+    m.position.set(x, y, z);
+    scene.add(m);
+    state.mapObjects.push(m);
+  }
+  const pillarMat = new THREE.MeshBasicMaterial({ color: 0x5fe7ff, transparent: true, opacity: 0.3, depthWrite: false });
+  const pillarGeo = new THREE.CylinderGeometry(0.16, 0.16, map.wallHeight + 2, 8);
+  for (const [px, pz] of [[hs, hs], [hs, -hs], [-hs, hs], [-hs, -hs]]) {
+    const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+    pillar.position.set(px, (map.wallHeight + 2) / 2, pz);
+    scene.add(pillar);
+    state.mapObjects.push(pillar);
+  }
+
+  // A/B 사이트 표시 — 홀로그램 존 + 컬러 조명 + 비콘 링
   for (const site of Object.values(map.sites)) {
-    const zoneMat = new THREE.MeshLambertMaterial({ color: 0x57d69b, transparent: true, opacity: 0.14, side: THREE.DoubleSide });
+    const labelTxt = site.label || (site.cx < 0 ? "A" : "B");
+    const siteCol = labelTxt === "B" ? 0xffa94d : 0x57d69b;
+    const siteHex = "#" + new THREE.Color(siteCol).getHexString();
+
+    const zoneMat = new THREE.MeshBasicMaterial({ color: siteCol, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false });
     const zone = new THREE.Mesh(new THREE.PlaneGeometry(site.w, site.d), zoneMat);
     zone.rotation.x = -Math.PI / 2;
     zone.position.set(site.cx, 0.02, site.cz);
@@ -356,14 +521,36 @@ function buildWorld(map) {
 
     const edge = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.PlaneGeometry(site.w, site.d)),
-      new THREE.LineBasicMaterial({ color: 0x57d69b, transparent: true, opacity: 0.6 })
+      new THREE.LineBasicMaterial({ color: siteCol, transparent: true, opacity: 0.8 })
     );
     edge.rotation.x = -Math.PI / 2;
     edge.position.set(site.cx, 0.03, site.cz);
     scene.add(edge);
     state.mapObjects.push(edge);
 
-    const label = makeTxtSprite(site.label || (site.cx < 0 ? "A" : "B"), "#57d69b", 128);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(1.7, 1.9, 32),
+      new THREE.MeshBasicMaterial({ color: siteCol, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(site.cx, 0.035, site.cz);
+    scene.add(ring);
+    state.mapObjects.push(ring);
+
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.05, 1.05, map.wallHeight, 24, 1, true),
+      new THREE.MeshBasicMaterial({ color: siteCol, transparent: true, opacity: 0.055, side: THREE.DoubleSide, depthWrite: false })
+    );
+    beam.position.set(site.cx, map.wallHeight / 2, site.cz);
+    scene.add(beam);
+    state.mapObjects.push(beam);
+
+    const lamp = new THREE.PointLight(siteCol, 1.15, 20, 2);
+    lamp.position.set(site.cx, 3.2, site.cz);
+    scene.add(lamp);
+    state.mapObjects.push(lamp);
+
+    const label = makeTxtSprite(labelTxt, siteHex, 128);
     label.position.set(site.cx, 0.4, site.cz);
     label.scale.set(3, 0.6, 1);
     scene.add(label);
@@ -402,30 +589,95 @@ function makeTxtSprite(text, color, size) {
 
 function makePlayerMesh(p) {
   const group = new THREE.Group();
-  const color = TEAM_COLOR[p.team];
-  const mat = new THREE.MeshLambertMaterial({ color });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x22262f });
-  // 플레이어별 알록달록 색상 (chest/헬멧/권총/배낭 강조)
-  const pCol = new THREE.Color().setHSL(((p.playerColor || 0) % 360) / 360, 0.75, 0.55);
-  const pColDark = pCol.clone().multiplyScalar(0.55);
+  const teamCol = new THREE.Color(TEAM_COLOR[p.team]);
+  const pCol = new THREE.Color().setHSL(((p.playerColor || 0) % 360) / 360, 0.7, 0.6);
+  const armorMat = new THREE.MeshStandardMaterial({
+    color: teamCol.clone().multiplyScalar(0.72), roughness: 0.55, metalness: 0.35,
+  });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1b2430, roughness: 0.8, metalness: 0.2 });
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: pCol, roughness: 0.45, metalness: 0.35,
+    emissive: pCol.clone().multiplyScalar(0.35), emissiveIntensity: 1,
+  });
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xd8b28a, roughness: 0.9, metalness: 0 });
+  const visorMat = new THREE.MeshBasicMaterial({ color: 0x7fe7ff });
+  const cyl = (rt, rb, h, seg, mat) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
 
-  const legL = meshBox(0.24, 0.5, 0.26, dark); legL.position.set(-0.18, 0.28, 0);
-  const legR = meshBox(0.24, 0.5, 0.26, dark); legR.position.set(0.18, 0.28, 0);
-  const body = meshBox(0.72, 1.25, 0.44, mat); body.position.y = 0.63;
-  const chest = meshBox(0.78, 0.42, 0.52, new THREE.MeshLambertMaterial({ color: pCol })); chest.position.y = 1.05;
-  const pack = meshBox(0.5, 0.55, 0.22, new THREE.MeshLambertMaterial({ color: pColDark })); pack.position.set(0, 0.95, -0.32);
-  const head = meshBox(0.5, 0.4, 0.42, new THREE.MeshLambertMaterial({ color: 0xd8b28a })); head.position.y = 1.62;
-  const helmet = meshBox(0.54, 0.2, 0.46, new THREE.MeshLambertMaterial({ color: pCol })); helmet.position.set(0, 1.78, 0);
-  const gun = meshBox(0.12, 0.12, 0.7, new THREE.MeshLambertMaterial({ color: pColDark })); gun.position.set(0.34, 1.12, 0.5);
+  // 다리 / 부츠
+  for (const sx of [-0.17, 0.17]) {
+    const leg = cyl(0.115, 0.14, 0.58, 8, darkMat);
+    leg.position.set(sx, 0.34, 0);
+    const boot = meshBox(0.23, 0.13, 0.34, darkMat);
+    boot.position.set(sx, 0.065, 0.06);
+    const knee = meshBox(0.2, 0.12, 0.22, armorMat);
+    knee.position.set(sx, 0.54, 0.05);
+    group.add(leg, boot, knee);
+  }
 
-  group.add(legL, legR, body, chest, pack, head, helmet, gun);
+  // 힙 / 몸통 / 가슴 플레이트
+  const hips = meshBox(0.46, 0.18, 0.3, darkMat); hips.position.y = 0.64;
+  const torso = cyl(0.27, 0.34, 0.58, 8, armorMat); torso.position.y = 0.96;
+  const chest = meshBox(0.56, 0.34, 0.32, armorMat); chest.position.set(0, 1.02, 0.07);
+  const chestGlow = meshBox(0.18, 0.22, 0.02, accentMat); chestGlow.position.set(0, 1.02, 0.24);
+  const belt = meshBox(0.48, 0.07, 0.31, accentMat); belt.position.y = 0.74;
+  group.add(hips, torso, chest, chestGlow, belt);
 
-  const nameSpr = makeTxtSprite(p.nickname, p.team === "red" ? "#ff8a8a" : "#8ab6ff", 30);
-  nameSpr.position.set(0, 2.32, 0);
+  // 어꺠 / 팔 / 장갑
+  for (const sx of [-1, 1]) {
+    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.125, 10, 8), armorMat);
+    shoulder.position.set(sx * 0.35, 1.2, 0);
+    const shoulderGlow = meshBox(0.1, 0.035, 0.12, accentMat);
+    shoulderGlow.position.set(sx * 0.35, 1.31, 0.03);
+    const arm = cyl(0.07, 0.085, 0.46, 8, darkMat);
+    arm.position.set(sx * 0.4, 0.93, 0.02);
+    arm.rotation.z = sx * 0.12;
+    const glove = meshBox(0.1, 0.11, 0.13, darkMat);
+    glove.position.set(sx * 0.42, 0.7, 0.06);
+    group.add(shoulder, shoulderGlow, arm, glove);
+  }
+
+  // 목 / 헤드 / 헬멧 / 발광 바이저
+  const neck = cyl(0.09, 0.1, 0.12, 8, skinMat); neck.position.y = 1.3;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), skinMat); head.position.y = 1.48;
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.195, 12, 10), armorMat);
+  helmet.position.set(0, 1.51, -0.02); helmet.scale.y = 0.9;
+  const visor = meshBox(0.3, 0.1, 0.12, visorMat); visor.position.set(0, 1.48, 0.15);
+  const visorFrame = meshBox(0.34, 0.13, 0.02, darkMat); visorFrame.position.set(0, 1.48, 0.09);
+  group.add(neck, head, helmet, visor, visorFrame);
+
+  // 백패 / 백팩 라이트
+  const pack = meshBox(0.4, 0.5, 0.2, darkMat); pack.position.set(0, 1.0, -0.27);
+  const packLight = meshBox(0.16, 0.04, 0.02, accentMat); packLight.position.set(0, 1.14, -0.38);
+  group.add(pack, packLight);
+
+  // 소총 (오른손)
+  const gun = new THREE.Group();
+  const receiver = meshBox(0.1, 0.13, 0.46, darkMat); receiver.position.set(0, 0, 0);
+  const barrel = cyl(0.032, 0.032, 0.34, 8, darkMat);
+  barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.04, 0.4);
+  const stock = meshBox(0.09, 0.14, 0.2, darkMat); stock.position.set(0, -0.02, -0.32);
+  const mag = meshBox(0.07, 0.18, 0.1, darkMat); mag.position.set(0, -0.13, 0.02);
+  const gunGlow = meshBox(0.11, 0.02, 0.3, accentMat); gunGlow.position.set(0, 0.08, 0.03);
+  gun.add(receiver, barrel, stock, mag, gunGlow);
+  gun.position.set(0.34, 1.03, 0.28);
+  group.add(gun);
+
+  // 발밑 팀 링
+  const teamRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 0.58, 24),
+    new THREE.MeshBasicMaterial({ color: teamCol, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false })
+  );
+  teamRing.rotation.x = -Math.PI / 2;
+  teamRing.position.y = 0.018;
+  group.add(teamRing);
+
+  const nameSpr = makeTxtSprite(p.nickname, p.team === "red" ? "#ff8a8a" : "#8ab6ff", 26);
+  nameSpr.scale.set(1.34, 0.34, 1);
+  nameSpr.position.set(0, 2.22, 0);
   group.add(nameSpr);
 
   const hpBar = makeHpBarSprite();
-  hpBar.sprite.position.set(0, 2.76, 0);
+  hpBar.sprite.position.set(0, 2.6, 0);
   group.add(hpBar.sprite);
 
   // 스파이크(폭탄) 캐리어 표시 — 머리 위 아이콘 (들고 있을 때만 표시)
@@ -464,7 +716,7 @@ function makeHpBarSprite() {
   const ctx = cv.getContext("2d");
   const tex = new THREE.CanvasTexture(cv);
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: false }));
-  spr.scale.set(1.0, 0.11, 1);
+  spr.scale.set(0.75, 0.083, 1);
   let owner = null;
   const draw = (p, ref) => {
     owner = p;
@@ -1266,30 +1518,69 @@ function updateLobbyLoadout(pulse) {
     <span class="lo-item ${mp ? "on" : ""} ${pulse === "map" ? "pulse" : ""}">🗺️ ${mp ? esc(mp.name) : "맵 미선택"}<em>선택</em></span>`;
 }
 
+const AGENT_META = {
+  vanguard: { role: "INITIATOR" },
+  rush: { role: "DUELIST" },
+  guard: { role: "SENTINEL" },
+  venom: { role: "CONTROLLER" },
+};
+
+function updateAgentShowcase() {
+  const root = $("#agent-showcase");
+  if (!root) return;
+  const id = state.myChar || "vanguard";
+  const ch = (state.characters || {})[id];
+  const meta = AGENT_META[id] || { role: "AGENT" };
+  root.className = "agent-showcase char-" + id;
+
+  const text = (sel, value) => { const el = $(sel); if (el) el.textContent = value; };
+  text("#showcase-role", meta.role);
+  text("#showcase-name", ch?.name || "에이전트");
+  text("#showcase-desc", ch?.desc || "에이전트 정보를 불러오는 중…");
+
+  const hp = ch ? Math.round(150 * ch.hp) : 150;
+  const spd = ch ? Math.round(ch.speed * 100) : 100;
+  text("#showcase-hp", String(hp));
+  text("#showcase-speed", spd + "%");
+
+  const hpBar = $("#showcase-hp-bar");
+  if (hpBar) hpBar.style.setProperty("--v", Math.min(100, hp / 2) + "%");
+  const spBar = $("#showcase-speed-bar");
+  if (spBar) spBar.style.setProperty("--v", Math.min(100, spd * 0.7) + "%");
+
+  text("#showcase-skill", ch?.skillDesc || "");
+  text("#showcase-ult", ch?.ultDesc || "");
+}
+
 function renderLobbySelect() {
   const chars = state.characters || {};
   const charEl = $("#char-select");
   if (charEl && Object.keys(chars).length) {
     charEl.innerHTML = Object.values(chars).map(ch => {
       const hp = Math.round(150 * ch.hp);
-      return `<button class="pick-card ${ch.id === state.myChar ? "sel" : ""}" data-char="${ch.id}" type="button">
-        <div class="pk-top"><span class="pk-emoji">${ch.emoji || "🎯"}</span><span class="pk-name">${esc(ch.name)}</span></div>
-        <div class="pk-tags">체력 <b>${hp}</b> · 속도 <b>${Math.round(ch.speed * 100)}%</b></div>
-        <div class="pk-desc">${esc(ch.desc || "")}</div>
-        <div class="pk-skill">${esc(ch.skillDesc || "")}</div>
-        <div class="pk-ult">${esc(ch.ultDesc || "")}</div>
+      const meta = AGENT_META[ch.id] || { role: "AGENT" };
+      return `<button class="agent-card char-${ch.id} ${ch.id === state.myChar ? "sel" : ""}" data-char="${ch.id}" type="button" aria-label="${esc(ch.name)} 선택">
+        <span class="agent-art"></span>
+        <span class="agent-shade"></span>
+        <span class="agent-check">✓</span>
+        <span class="agent-meta">
+          <span class="agent-role">${meta.role}</span>
+          <span class="agent-name">${esc(ch.name)}</span>
+          <span class="agent-stats">HP ${hp} · SPD ${Math.round(ch.speed * 100)}</span>
+        </span>
       </button>`;
     }).join("");
-    for (const b of charEl.querySelectorAll(".pick-card")) {
+    for (const b of charEl.querySelectorAll(".agent-card")) {
       b.addEventListener("click", () => {
         state.myChar = b.dataset.char;
         state.speedMult = (chars[state.myChar]?.speed) || 1;
         renderLobbySelect();
-        pickPulse(charEl.querySelector(`.pick-card[data-char="${state.myChar}"]`));
+        pickPulse(charEl.querySelector(`.agent-card[data-char="${state.myChar}"]`));
         updateLobbyLoadout("char");
         lobbyToast(`✓ ${chars[state.myChar]?.name || "캐릭터"} 장착!`);
       });
     }
+    updateAgentShowcase();
   } else if (charEl) {
     charEl.innerHTML = '<div class="pk-note">서버 연결 대기 중…</div>';
   }
@@ -1298,16 +1589,16 @@ function renderLobbySelect() {
   const mapEl = $("#map-select");
   if (mapEl && Object.keys(mapsData).length) {
     mapEl.innerHTML = Object.values(mapsData).map(m => `
-      <button class="pick-card ${m.id === state.mapId ? "sel" : ""}" data-map="${m.id}" type="button">
-        <div class="pk-top"><span class="pk-name">🗺️ ${esc(m.name)}</span></div>
-        <div class="pk-desc">${esc(m.desc || "")}</div>
-        <div class="pk-note">방 만들 때 맵이 결정됩니다</div>
+      <button class="map-card map-${m.id} ${m.id === state.mapId ? "sel" : ""}" data-map="${m.id}" type="button">
+        <span class="map-art"></span>
+        <span class="map-name">${esc(m.name)}</span>
+        <span class="map-desc">${esc(m.desc || "")}</span>
       </button>`).join("");
-    for (const b of mapEl.querySelectorAll(".pick-card")) {
+    for (const b of mapEl.querySelectorAll(".map-card")) {
       b.addEventListener("click", () => {
         state.mapId = b.dataset.map;
         renderLobbySelect();
-        pickPulse(mapEl.querySelector(`.pick-card[data-map="${state.mapId}"]`));
+        pickPulse(mapEl.querySelector(`.map-card[data-map="${state.mapId}"]`));
         updateLobbyLoadout("map");
         lobbyToast(`✓ ${mapsData[state.mapId]?.name || "맵"} 선택! (방 만들 때 적용)`);
       });
@@ -1320,11 +1611,13 @@ function renderLobbySelect() {
   const wEl = $("#weapon-info");
   if (wEl && Object.keys(weapons).length) {
     wEl.innerHTML = Object.values(weapons).map(w => {
-      const auto = w.auto ? "자동" : "반자동";
-      return `<div class="ws-mini">
-        <div class="wm-name">${esc(w.name)}<em>${w.price === 0 ? "기본" : w.price.toLocaleString()}</em></div>
-        <div>몸통 <b>${w.body}</b> · 헤드 <b>${w.head}</b> · 다리 <b>${w.legs}</b></div>
-        <div>장탄 <b>${w.magSize}</b>발 · ${w.cadence}s · ${auto}</div>
+      return `<div class="weapon-chip">
+        <span class="w-icon">${w.icon || "🔫"}</span>
+        <span class="w-copy">
+          <span class="w-name">${esc(w.name)}</span>
+          <span class="w-stats">DMG ${w.body} / HS ${w.head} · ${w.magSize}발</span>
+        </span>
+        <span class="w-price">${w.price === 0 ? "FREE" : w.price.toLocaleString()}</span>
       </div>`;
     }).join("");
   } else if (wEl) {
@@ -1343,6 +1636,7 @@ function addMuzzleFlash() {
 
 function renderLobby(room) {
   const isHost = room.host === socket.id;
+  $("#lobby").classList.add("in-room");
   $("#lobby-room").classList.remove("hidden");
   $("#room-code").textContent = room.roomId;
   $("#btn-start").classList.toggle("hidden", !isHost);
@@ -1559,6 +1853,8 @@ socket.on("game:state", (snap) => {
     ent.target.hp = p.hp;
     ent.kills = p.kills || 0; ent.deaths = p.deaths || 0; ent.assists = p.assists || 0;
     ent.hpBar.draw(p, null);
+    // 스폰 겹침 등으로 카메라 바로 앞에 붙은 캐릭터는 1인칭 시야를 가리지 않게 숨김
+    ent.group.visible = Math.hypot(ent.target.x - state.x, ent.target.z - state.z) > 1.1;
   }
   for (const [id, ent] of state.players) {
     if (!seen.has(id)) { scene.remove(ent.group); state.players.delete(id); }
@@ -1814,6 +2110,8 @@ function enterLobbyUI() {
   $("#weapon-select").classList.add("hidden");
   $("#hud").classList.add("hidden");
   $("#lobby").classList.remove("hidden");
+  $("#lobby").classList.remove("in-room");
+  $("#lobby-room").classList.add("hidden");
   renderLobbySelect();
 }
 
@@ -1854,9 +2152,9 @@ function animate(now) {
     // 화면 흔들림 (궁극기 폭발 등) — 오프셋 적용은 아래 camera.position.set 이후에 수행
 
     // 뷰모델 ADS 위치 (x는 항상 중앙 고정)
-    const vx = 0;
-    const vy = state.ads ? -0.22 : -0.16;
-    const vz = state.ads ? -0.3 : -0.48;
+    const vx = state.ads ? 0.04 : 0.28;
+    const vy = state.ads ? -0.16 : -0.2;
+    const vz = state.ads ? -0.65 : -0.88;
     viewmodel.position.x += (vx - viewmodel.position.x) * Math.min(1, dt * 14);
     viewmodel.position.y += (vy - viewmodel.position.y) * Math.min(1, dt * 14);
     viewmodel.position.z += (vz - viewmodel.position.z) * Math.min(1, dt * 14);

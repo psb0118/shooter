@@ -4,62 +4,133 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Shooter — 5v5 전술 슈터</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="lobby.css" />
+  <link rel="stylesheet" href="game-ui.css" />
 </head>
 <body>
   <div id="game-canvas"></div>
 
   <!-- ==================== 로비 ==================== -->
-  <div id="lobby" class="overlay">
+  <div id="lobby" class="overlay lobby-screen">
     <div id="lobby-toast" class="hidden"></div>
-    <div class="lobby-box">
-      <h1>🎯 SHOOTER</h1>
-      <p class="sub">5v5 전술 슈터 · 발로란트식 라운드</p>
+    <div class="lobby-bg" aria-hidden="true"></div>
+    <div class="lobby-grid" aria-hidden="true"></div>
+    <div class="lobby-scan" aria-hidden="true"></div>
 
-      <div class="lobby-row">
-        <input id="nickname" maxlength="16" placeholder="닉네임" autocomplete="off" />
-      </div>
+    <div class="lobby-shell">
+      <header class="lobby-top">
+        <div class="lobby-brand">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <div class="brand-copy">
+            <div class="brand-kicker">TACTICAL 5V5 · ROUND BASED</div>
+            <h1>SHOOTER<span>//</span></h1>
+          </div>
+        </div>
+        <div class="lobby-top-right">
+          <div class="server-pill"><i></i> ONLINE <b>30Hz</b></div>
+          <div class="season-pill">SEASON 01 <b>ORIGIN</b></div>
+        </div>
+      </header>
 
-      <div id="lobby-loadout" class="lobby-loadout"></div>
+      <main class="lobby-main">
+        <aside class="lobby-agents">
+          <div class="panel-label"><span>01</span> AGENT SELECT</div>
+          <div id="char-select" class="agent-grid"></div>
+          <div id="lobby-loadout" class="lobby-loadout"></div>
 
-      <!-- 캐릭터 선택 (정보 카드) -->
-      <div class="lobby-section">
-        <div class="lobby-sec-title">캐릭터 선택 <em>체력·속도·연막·궁극기가 다릅니다</em></div>
-        <div id="char-select" class="pick-grid"></div>
-      </div>
+          <div class="squad-card">
+            <div class="squad-head"><span>SQUAD</span><b>AUTO FILL</b></div>
+            <div class="squad-slots"><i class="filled">YOU</i><i>BOT</i><i>BOT</i><i>BOT</i><i>BOT</i></div>
+            <p>혼자 시작해도 AI 봇이 5v5를 채웁니다.</p>
+          </div>
+        </aside>
 
-      <!-- 맵 선택 (방장) -->
-      <div class="lobby-section">
-        <div class="lobby-sec-title">맵 선택</div>
-        <div id="map-select" class="pick-grid"></div>
-      </div>
+        <section id="agent-showcase" class="agent-showcase char-vanguard">
+          <div class="showcase-portrait"></div>
+          <div class="showcase-fade"></div>
+          <div class="showcase-copy">
+            <div id="showcase-role" class="showcase-role">INITIATOR</div>
+            <h2 id="showcase-name">뱅가드</h2>
+            <p id="showcase-desc" class="showcase-desc"></p>
+            <div class="showcase-stats">
+              <div class="stat">
+                <span>HP</span><b id="showcase-hp">150</b>
+                <i id="showcase-hp-bar" style="--v:75%"></i>
+              </div>
+              <div class="stat">
+                <span>SPEED</span><b id="showcase-speed">100%</b>
+                <i id="showcase-speed-bar" style="--v:70%"></i>
+              </div>
+            </div>
+            <div class="showcase-abilities">
+              <div class="ability">
+                <kbd>Q</kbd>
+                <div><b>연막</b><p id="showcase-skill"></p></div>
+              </div>
+              <div class="ability ult">
+                <kbd>X</kbd>
+                <div><b>궁극기</b><p id="showcase-ult"></p></div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <!-- 무기 정보 -->
-      <div class="lobby-section">
-        <div class="lobby-sec-title">무기 정보 <em>정확한 능력치</em></div>
+        <aside class="lobby-deploy">
+          <div class="panel-label"><span>02</span> DEPLOY</div>
+
+          <div class="deploy-form">
+            <div class="deploy-card">
+              <label class="field-label" for="nickname">CALLSIGN</label>
+              <input id="nickname" maxlength="16" placeholder="닉네임을 입력하세요" autocomplete="off" />
+
+              <div class="field-label">MAP</div>
+              <div id="map-select" class="map-grid"></div>
+
+              <button id="btn-create" class="btn primary deploy-btn">방 만들기 <span>→</span></button>
+
+              <div class="lobby-divider">OR JOIN WITH CODE</div>
+              <div class="join-row">
+                <input id="join-code" maxlength="6" placeholder="ABC123" autocomplete="off" />
+                <button id="btn-join" class="btn">참여</button>
+              </div>
+              <div id="lobby-status" class="status"></div>
+            </div>
+          </div>
+
+          <div id="lobby-room" class="hidden">
+            <div class="room-head">
+              <div>
+                <div class="room-code-label">ROOM CODE</div>
+                <div id="room-code" class="room-code"></div>
+              </div>
+              <div class="room-live"><i></i> WAITING</div>
+            </div>
+            <div class="lobby-note">방 코드를 공유하고 <b>13라운드</b>를 먼저 가져가세요. 스파이크 설치 → 폭발.</div>
+            <div id="player-list" class="player-list"></div>
+            <button id="btn-start" class="btn primary big hidden">게임 시작</button>
+          </div>
+
+          <div class="brief-card">
+            <div class="brief-title">MISSION BRIEF</div>
+            <div class="brief-row"><b>13</b><span>라운드 선취</span></div>
+            <div class="brief-row"><b>5V5</b><span>AI 봇 자동 충원</span></div>
+            <div class="brief-row"><b>SPIKE</b><span>설치 · 폭발 · 해체</span></div>
+            <div class="brief-tip">TIP · Q 연막으로 진입로를 막고 X 궁극기로 사이트를 정리하세요.</div>
+          </div>
+        </aside>
+      </main>
+
+      <section class="lobby-bottom">
+        <div class="panel-label"><span>03</span> ARSENAL</div>
         <div id="weapon-info" class="ws-grid-mini"></div>
-      </div>
+      </section>
 
-      <div class="lobby-actions">
-        <button id="btn-create" class="btn primary">방 만들기</button>
-      </div>
-      <div class="lobby-divider">— 또는 —</div>
-      <div class="lobby-row">
-        <input id="join-code" maxlength="6" placeholder="방 코드 (예: ABC123)" autocomplete="off" />
-      </div>
-      <div class="lobby-actions">
-        <button id="btn-join" class="btn">방 참여하기</button>
-      </div>
-
-      <div id="lobby-status" class="status"></div>
-
-      <div id="lobby-room" class="hidden">
-        <div class="room-code-label">방 코드</div>
-        <div id="room-code" class="room-code"></div>
-        <div class="lobby-note">방 코드를 친구에게 공유하세요.<br />먼저 <b>13라운드</b>를 이기면 승리! 스파이크를 설치하고 폭발시키세요.<br />PC: WASD 이동 · Shift 달리기 · <b>Space 점프</b> · LMB 사격 · 우클릭 조준(ADS) · R 재장전 · <b>E 설치/해체</b> · <b>Q 연막</b> · <b>X 궁극기</b> · 1~5 무기 구매 · P 구매창<br />모바일: 왼쪽 조이스틱 이동 · 오른쪽 드래그 조준 · 🔫 발사 · ↻ 재장전 · ✋ 설치/해체</div>
-        <div id="player-list" class="player-list"></div>
-        <button id="btn-start" class="btn primary big hidden">게임 시작</button>
-      </div>
+      <footer class="lobby-footer">
+        <span>WASD MOVE · SHIFT SPRINT · LMB FIRE · RMB ADS · R RELOAD</span>
+        <span>Q SMOKE · X ULT · E PLANT · P BUY</span>
+      </footer>
     </div>
   </div>
 
@@ -106,10 +177,17 @@
   <!-- ==================== 무기 선택 (구매) ==================== -->
   <div id="weapon-select" class="overlay weapons hidden">
     <div class="ws-box">
-      <h2>무기 구매</h2>
-      <p class="ws-sub">구매 단계에만 가능 · 게임 중 <b>P</b> 키로 최대한 활용 · 지갑: <b id="ws-money">800</b></p>
+      <div class="ws-head">
+        <div>
+          <div class="ws-kicker">BUY PHASE · LOADOUT</div>
+          <h2>무기 구매</h2>
+        </div>
+        <div class="ws-wallet"><span>CREDITS</span><b id="ws-money">800</b></div>
+      </div>
+      <p class="ws-sub">구매 단계에만 가능 · 숫자 <b>1–5</b> 빠른 구매 · <b>P</b> 닫기</p>
       <div id="ws-toast" class="hidden"></div>
       <div id="ws-grid"></div>
+      <div class="ws-foot"><span>LOADOUT // PRIMARY</span><span>TACTICAL 5V5</span></div>
     </div>
   </div>
 
@@ -160,12 +238,12 @@
 
     <div id="skill-hud">
       <div id="skill-smoke" class="skill-card" title="연막 [Q]">
-        <div class="skill-icon">🌫️</div>
+        <div class="skill-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 17.5h11a3.5 3.5 0 0 0 .4-6.98A5 5 0 0 0 8.2 9.4a4.05 4.05 0 0 0-1.7 8.1Z"/><path d="M8 20.5h8"/></svg></div>
         <div class="skill-label">연막</div>
         <div class="skill-key">Q</div>
       </div>
       <div id="skill-ult" class="skill-card" title="궁극기 [X]">
-        <div class="skill-icon">⚡</div>
+        <div class="skill-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 5 14h6l-1 8 8-12h-6l1-8Z"/></svg></div>
         <div class="skill-label">궁극기</div>
         <div id="skill-ult-charge" class="skill-bar">0%</div>
         <div class="skill-key">X</div>
