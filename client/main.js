@@ -91,6 +91,15 @@ const state = {
   smokes: [],
   screenShake: 0,
   lastInput: 0,
+  inputSeq: 0,
+  lastAckSeq: 0,
+  serverCorrections: 0,
+  serverSnaps: 0,
+  serverError: 0,
+  roomId: null,
+  roomHost: null,
+  sessionToken: null,
+  perf: { frames: 0, elapsed: 0, fps: 60, renderScale: 1 },
   cam: { fov: 75 },
   viewmodel: null,
   lastViewModel: null,
@@ -102,6 +111,42 @@ window.__s = windowState; // 디버그 훅
 
 const socket = io();
 state.myId = socket.id;
+
+/* 재접속 세션 — 탭을 새로고침해도 같은 방/경기로 돌아온다. */
+const SESSION_KEY = "shooter_session";
+const ROOM_KEY = "shooter_room";
+function makeSessionToken() {
+  try {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    if (window.crypto?.getRandomValues) {
+      const a = new Uint8Array(16);
+      window.crypto.getRandomValues(a);
+      return Array.from(a, b => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch {}
+  return "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
+}
+try {
+  state.sessionToken = sessionStorage.getItem(SESSION_KEY) || makeSessionToken();
+  sessionStorage.setItem(SESSION_KEY, state.sessionToken);
+  state.roomId = sessionStorage.getItem(ROOM_KEY) || null;
+} catch {
+  state.sessionToken = makeSessionToken();
+}
+
+function rememberRoom(roomId) {
+  state.roomId = roomId || null;
+  try {
+    if (roomId) sessionStorage.setItem(ROOM_KEY, roomId);
+    else sessionStorage.removeItem(ROOM_KEY);
+  } catch {}
+}
+
+function rememberToken(token) {
+  if (!token) return;
+  state.sessionToken = token;
+  try { sessionStorage.setItem(SESSION_KEY, token); } catch {}
+}
 
 /* ================= 오디오 (합성) ================= */
 
@@ -188,7 +233,14 @@ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerH
 camera.rotation.order = "YXZ";
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const MAX_PIXEL_RATIO = TOUCH ? 1.5 : 2;
+let renderScale = 1;
+function applyRenderScale() {
+  const base = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+  renderer.setPixelRatio(Math.max(0.65, base * renderScale));
+  state.perf.renderScale = renderScale;
+}
+applyRenderScale();
 if (THREE.ACESFilmicToneMapping) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 0.88;
@@ -1103,13 +1155,19 @@ function updateInteractHint() {
 let heldFire = false;   // 물리적으로 눌려 있는 좌클릭 (포인터 락 획득 클릭도 즉시 발사 처리)
 let heldAds = false;
 
-function flushInput() {
+function sendInput() {
   if (!state.inGame || !state.alive) return;
+  state.inputSeq += 1;
   socket.emit("game:input", {
+    seq: state.inputSeq,
     keys: state.keys, yaw: state.yaw, pitch: state.pitch,
     x: state.x, z: state.z,
     firing: state.firing, ads: state.ads,
   });
+}
+
+function flushInput() {
+  sendInput();
 }
 
 function pointerLocked() { return document.pointerLockElement === renderer.domElement; }
@@ -1775,10 +1833,16 @@ function addMuzzleFlash() {
 
 function renderLobby(room) {
   const isHost = room.host === socket.id;
+  state.roomHost = room.host || null;
   $("#lobby").classList.add("in-room");
   $("#lobby-room").classList.remove("hidden");
   $("#room-code").textContent = room.roomId;
   $("#btn-start").classList.toggle("hidden", !isHost);
+  const diff = $("#bot-difficulty");
+  if (diff) {
+    diff.value = room.difficulty || "normal";
+    diff.disabled = !isHost;
+  }
   $("#player-list").innerHTML = room.players.map((p) => {
     const me = p.socketId === socket.id;
     return `<div class="player-item">
@@ -1793,6 +1857,9 @@ function enterLobby(room) {
   setLobbyOpen(true);
   setModalScroll(false);
   state.inGame = false;
+  state.roomId = room.roomId || state.roomId;
+  state.roomHost = room.host || null;
+  rememberRoom(state.roomId);
   // 버그: 로비 재진입 시 이전 라운드의 맵/벽/사이트/플레이어 메시가 남아 중첩됐다 — 씬 정리 선행
   clearWorldObjects();
   state.myTeam = room.players.find(p => p.socketId === socket.id)?.team || null;
@@ -1831,7 +1898,56 @@ function clearMatchUI() {
 
 /* ================= 소켓 이벤트 ================= */
 
-socket.on("connect", () => { state.myId = socket.id; });
+function showConnection(text) {
+  const el = $("#connection-overlay");
+  if (!el) return;
+  const msg = $("#connection-text");
+  if (msg && text) msg.textContent = text;
+  el.classList.remove("hidden");
+  state.uiLock = true;
+}
+
+function hideConnection() {
+  const el = $("#connection-overlay");
+  if (el) el.classList.add("hidden");
+  const modalOpen = !$("#weapon-select").classList.contains("hidden") ||
+    !$("#pause").classList.contains("hidden");
+  state.uiLock = state.inGame && modalOpen;
+}
+
+function forgetSession() {
+  rememberRoom(null);
+}
+
+socket.on("connect", () => {
+  state.myId = socket.id;
+  if (state.roomId && state.sessionToken) {
+    showConnection("경기 상태를 복구하는 중입니다. 잠시만 기다려 주세요.");
+    socket.emit("session:resume", { sessionToken: state.sessionToken });
+  } else {
+    hideConnection();
+  }
+});
+
+socket.on("session:resumed", (d) => {
+  if (!d?.ok) {
+    forgetSession();
+    hideConnection();
+    showStatus(d?.reason || "세션을 복구하지 못했습니다.");
+    enterLobbyUI();
+    return;
+  }
+  state.myId = socket.id;
+  state.roomId = d.roomId;
+  state.roomHost = d.room?.host || null;
+  rememberRoom(d.roomId);
+  hideConnection();
+  if (d.status !== "playing") {
+    enterLobby(d.room);
+  } else if (d.room) {
+    state.myTeam = d.room.players.find(p => p.socketId === socket.id)?.team || state.myTeam;
+  }
+});
 
 socket.on("server:ready", (d) => {
   if (d.characters) state.characters = d.characters;
@@ -1840,17 +1956,20 @@ socket.on("server:ready", (d) => {
   renderLobbySelect();
 });
 
-socket.on("lobby:created", (d) => { if (d.ok) { showStatus(""); enterLobby(d.room); } });
+socket.on("lobby:created", (d) => { if (d.ok) { showStatus(""); rememberToken(d.sessionToken); enterLobby(d.room); } });
 socket.on("lobby:join", (d) => {
   if (!d.ok) { showStatus(d.reason); return; }
   showStatus("");
+  rememberToken(d.sessionToken);
   enterLobby(d.room);
 });
-socket.on("lobby:state", (room) => { state.myTeam = room.players.find(p => p.socketId === socket.id)?.team || null; renderLobby(room); });
+socket.on("lobby:state", (room) => { state.myTeam = room.players.find(p => p.socketId === socket.id)?.team || null; state.roomHost = room.host || null; renderLobby(room); });
 socket.on("lobby:start", () => { showStatus(""); });
 
 socket.on("game:started", (d) => {
   if (!d.ok) return;
+  if (d.roomId) rememberRoom(d.roomId);
+  hideConnection();
   state.inGame = true;
   state.map = d.map;
   state.mapId = d.mapId;
@@ -1865,6 +1984,8 @@ socket.on("game:started", (d) => {
   state.joinBuyOpened = false;
   state.myTeam = d.me?.team || (d.state.players.find(p => p.id === state.myId)?.team) || null;
   state.kills = 0; state.deaths = 0;
+  state.inputSeq = 0; state.lastAckSeq = 0;
+  state.serverCorrections = 0; state.serverSnaps = 0;
   state.alive = true;
   state.ads = false;
   state.firing = false;
@@ -1900,6 +2021,8 @@ socket.on("game:started", (d) => {
 });
 
 socket.on("game:sync", (d) => {
+  if (d.roomId) rememberRoom(d.roomId);
+  hideConnection();
   if (state.inGame) return;
   state.map = d.map;
   state.mapId = d.mapId;
@@ -1960,11 +2083,27 @@ socket.on("game:state", (snap) => {
   state.scores.red = snap.scores.red;
   state.scores.blue = snap.scores.blue;
 
-  // 자기 좌표 보정 (서버) — 수직도 포함
+  // 자기 좌표 보정 (서버 재조정)
+  // 서버가 마지막으로 ack한 입력 seq와 권위 좌표를 비교한다. 작은 오차는
+  // 순간이동 대신 부드럽게 흡수하고, 큰 오차(벽 통과/텔레포트)만 즉시 스냅한다.
   const self = snap.players.find(p => p.id === state.myId);
   if (self) {
-    const dx = state.x - self.x, dz = state.z - self.z;
-    if (Math.hypot(dx, dz) > RECONCILE_DIST) { state.x = self.x; state.z = self.z; state.vx = 0; state.vz = 0; }
+    if (typeof self.inputSeq === "number") state.lastAckSeq = Math.max(state.lastAckSeq, self.inputSeq);
+    const dx = self.x - state.x, dz = self.z - state.z;
+    const err = Math.hypot(dx, dz);
+    state.serverError = err;
+    if (err > RECONCILE_DIST) {
+      state.x = self.x;
+      state.z = self.z;
+      state.vx = typeof self.vx === "number" ? self.vx : 0;
+      state.vz = typeof self.vz === "number" ? self.vz : 0;
+      state.serverSnaps += 1;
+    } else if (err > 0.015) {
+      // 15Hz 스냅샷 사이에 약 28%씩 수렴 → 시각적 튐 없이 수백 ms 내 보정
+      state.x += dx * 0.28;
+      state.z += dz * 0.28;
+      state.serverCorrections += 1;
+    }
     if (Math.abs(state.y - (self.y || 0)) > 0.6) { state.y = self.y || 0; state.vy = 0; }
   }
 
@@ -2215,7 +2354,27 @@ socket.on("game:ended", (d) => {
   $("#end-score").textContent = `RED ${d.scores.red} : ${d.scores.blue} BLUE`;
 });
 
-socket.on("disconnect", () => {});
+socket.on("disconnect", (reason) => {
+  resetControls();
+  if (!state.roomId) return;
+  // 모달이 열린 채 연결이 끊겨도 재접속 화면이 가려지지 않게 정리한다.
+  $("#weapon-select").classList.add("hidden");
+  $("#pause").classList.add("hidden");
+  state.joinBuyOpened = false;
+  setModalScroll(false);
+  showConnection(reason === "io server disconnect"
+    ? "서버 연결이 종료되었습니다. 재시도해 주세요."
+    : "네트워크가 끊겼습니다. 경기 상태를 복구하는 중입니다.");
+});
+
+socket.on("connect_error", () => {
+  if (state.roomId) showConnection("서버에 연결하는 중입니다. 잠시만 기다려 주세요.");
+});
+
+$("#btn-retry")?.addEventListener("click", () => {
+  showConnection("서버에 다시 연결하는 중입니다.");
+  socket.connect();
+});
 
 /* ================= 로비 버튼 ================= */
 
@@ -2224,6 +2383,7 @@ $("#btn-create").addEventListener("click", () => {
     nickname: ($("#nickname").value || "플레이어").trim().slice(0, 16) || "플레이어",
     charId: state.myChar,
     mapId: state.mapId,
+    sessionToken: state.sessionToken,
   });
 });
 $("#btn-join").addEventListener("click", () => {
@@ -2233,9 +2393,14 @@ $("#btn-join").addEventListener("click", () => {
     roomId: code,
     nickname: ($("#nickname").value || "플레이어").trim().slice(0, 16) || "플레이어",
     charId: state.myChar,
+    sessionToken: state.sessionToken,
   });
 });
 $("#btn-start").addEventListener("click", () => socket.emit("lobby:start"));
+$("#bot-difficulty")?.addEventListener("change", (e) => {
+  if (state.roomHost !== socket.id) return;
+  socket.emit("lobby:difficulty", { difficulty: e.target.value });
+});
 $("#ws-close").addEventListener("click", () => closeBuyUI());
 $("#btn-back-lobby").addEventListener("click", () => {
   socket.emit("lobby:leave");
@@ -2273,6 +2438,11 @@ function enterLobbyUI() {
   setLobbyOpen(true);
   setModalScroll(false);
   state.inGame = false;
+  state.phase = "waiting";
+  state.uiLock = false;
+  state.roomHost = null;
+  rememberRoom(null);
+  hideConnection();
   // 버그: (btn-leave / btn-back-lobby) 로비 복귀 시 미정리된 3D 오브젝트가 다음 라운드에 중첩됐다
   clearWorldObjects();
   $("#end-screen").classList.add("hidden");
@@ -2296,10 +2466,30 @@ function enterLobbyUI() {
 
 let lastFrame = performance.now();
 
+/* 적응형 해상도 — 발열/저사양 모바일에서 FPS가 떨어지면 픽셀 비율을 낮춘다. */
+function updatePerformance(dt) {
+  if (document.hidden || dt <= 0) return;
+  const perf = state.perf;
+  perf.frames += 1;
+  perf.elapsed += dt;
+  if (perf.elapsed < 2) return;
+  perf.fps = perf.frames / perf.elapsed;
+  if (perf.fps < 48 && renderScale > 0.65) {
+    renderScale = Math.max(0.65, renderScale - 0.1);
+    applyRenderScale();
+  } else if (perf.fps > 57 && renderScale < 1) {
+    renderScale = Math.min(1, renderScale + 0.05);
+    applyRenderScale();
+  }
+  perf.frames = 0;
+  perf.elapsed = 0;
+}
+
 function animate(now) {
   requestAnimationFrame(animate);
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
+  updatePerformance(dt);
 
   if (!state.inGame) { renderer.render(scene, camera); return; }
 
@@ -2435,11 +2625,7 @@ function animate(now) {
   const nowMs = now;
   if (state.phase === "combat" && state.alive && nowMs - state.lastInput >= INPUT_SAMPLE_MS) {
     state.lastInput = nowMs;
-    socket.emit("game:input", {
-      keys: state.keys, yaw: state.yaw, pitch: state.pitch,
-      x: state.x, z: state.z,
-      firing: state.firing, ads: state.ads,
-    });
+    sendInput();
   }
 
   renderer.render(scene, camera);
@@ -2535,6 +2721,21 @@ function showHitMarker() {
 
 initTouchUI();
 setLobbyOpen(true);
+
+function showOnboarding() {
+  $("#onboarding-card")?.classList.remove("hidden");
+}
+function closeOnboarding() {
+  $("#onboarding-card")?.classList.add("hidden");
+  try { localStorage.setItem("shooter_onboarded", "1"); } catch {}
+}
+$("#btn-help")?.addEventListener("click", showOnboarding);
+$("#onboarding-close")?.addEventListener("click", closeOnboarding);
+$("#onboarding-done")?.addEventListener("click", closeOnboarding);
+try {
+  if (!localStorage.getItem("shooter_onboarded")) setTimeout(showOnboarding, 450);
+} catch {}
+
 const nick = localStorage.getItem("shooter_nick") || "";
 if (nick) $("#nickname").value = nick;
 $("#nickname").addEventListener("change", (e) => localStorage.setItem("shooter_nick", e.target.value.trim()));
@@ -2543,6 +2744,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  applyRenderScale();
 });
 
 window.__s.camera = camera;

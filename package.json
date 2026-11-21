@@ -10,9 +10,10 @@
   "scripts": {
     "start": "node server/server.js",
     "dev": "node --watch server/server.js",
-    "test": "node scripts/test-game.js && node scripts/test-socket.js && node scripts/test-touch-wiring.js && node scripts/test-mobile-touch.js",
+    "test": "node scripts/test-game.js && node scripts/test-socket.js && node scripts/test-reconnect.js && node scripts/test-touch-wiring.js && node scripts/test-mobile-touch.js",
     "test:unit": "node scripts/test-game.js",
-    "test:mobile": "node scripts/test-mobile-touch.js"
+    "test:mobile": "node scripts/test-mobile-touch.js",
+    "test:reconnect": "node scripts/test-reconnect.js"
   },
   "dependencies": {
     "express": "^4.21.2",

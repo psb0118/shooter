@@ -356,5 +356,23 @@ function toCombat(m) {
   ok("궁극기 충전 조건/발동/충전 소모");
 }
 
+/* --- 12. 입력 시퀀스 ack (클라이언트 서버 재조정 계약) --- */
+{
+  console.log("12) 입력 시퀀스 ack");
+  const m = createMatch("ACK");
+  m._now = () => 0;
+  m.addPlayer({ id: "r", nickname: "레드", team: "red" });
+  m.addPlayer({ id: "b", nickname: "블루", team: "blue" });
+  m.start();
+  m.input("r", { seq: 41, keys: {}, yaw: 0, pitch: 0 });
+  m.input("r", { seq: 42, keys: { w: true }, yaw: 0, pitch: 0 });
+  const snap = m.snapshot();
+  const r = snap.players.find(p => p.id === "r");
+  assert.equal(r.inputSeq, 42, "마지막 입력 seq를 스냅샷에 ack");
+  assert.equal(typeof r.vx, "number", "재조정용 vx 포함");
+  assert.equal(typeof r.vz, "number", "재조정용 vz 포함");
+  ok("입력 seq ack/속도 필드 포함");
+}
+
 console.log(`\n[game.js] ${passed}개 테스트 통과`);
 process.exit(0);

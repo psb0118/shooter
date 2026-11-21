@@ -7,6 +7,7 @@
 
 const path = require("path");
 const http = require("http");
+const crypto = require("crypto");
 const express = require("express");
 const { Server } = require("socket.io");
 const { WEAPONS, MAPS, CHARACTERS, TICK_RATE, STATE_RATE, createMatch } = require("./game.js");
@@ -16,6 +17,12 @@ const CLIENT_DIR = path.join(ROOT_DIR, "client");
 const PORT = process.env.PORT || 3000;
 const TARGET_PER_TEAM = 5; // 봇으로 팀별 5vs5 보충 (인간이 없을 때만)
 const BOT_NAMES = ["로봇", "알레망", "레이", "닉스", "토르", "바이퍼", "스카", "버트", "헌터", "제트"];
+const SESSION_TTL_MS = 60_000;
+const BOT_DIFFICULTY = {
+  easy:   { skill: [0.28, 0.55], react: 1.45, fire: 0.62, aim: 1.55 },
+  normal: { skill: [0.60, 1.00], react: 1.00, fire: 1.00, aim: 1.00 },
+  hard:   { skill: [0.82, 1.00], react: 0.58, fire: 1.18, aim: 0.62 },
+};
 let botSeq = 0;
 
 const app = express();
@@ -46,6 +53,44 @@ app.get("/api/health", (req, res) => {
 ========================================================= */
 
 const ROOMS = new Map();
+// sessionToken -> { roomId, playerId, socketId, timer }
+// 연결이 끊긴 플레이어를 60초 동안 방/경기에 유지해 재접속 복구에 사용한다.
+const SESSIONS = new Map();
+
+function normalizeDifficulty(value) {
+  return Object.prototype.hasOwnProperty.call(BOT_DIFFICULTY, value) ? value : "normal";
+}
+
+function sessionTokenFor(data) {
+  const token = String(data?.sessionToken || "");
+  return /^[A-Za-z0-9_-]{8,80}$/.test(token) ? token : crypto.randomUUID();
+}
+
+function attachSession(socket, token, roomId, playerId) {
+  const old = SESSIONS.get(token);
+  if (old?.timer) clearTimeout(old.timer);
+  socket.data.sessionToken = token;
+  SESSIONS.set(token, { roomId, playerId, socketId: socket.id, timer: null });
+}
+
+function clearSession(socket) {
+  const token = socket.data.sessionToken;
+  if (!token) return;
+  const entry = SESSIONS.get(token);
+  if (entry && entry.socketId === socket.id) {
+    if (entry.timer) clearTimeout(entry.timer);
+    SESSIONS.delete(token);
+  }
+  socket.data.sessionToken = null;
+}
+
+function hasPendingSession(room) {
+  for (const entry of SESSIONS.values()) {
+    if (entry.roomId !== room.id) continue;
+    if (room.players.some(p => p.socketId === entry.playerId && !p.connected)) return true;
+  }
+  return false;
+}
 
 /* 테스트 서버에서만 켜지는 결정론적 훅 (운영 환경에서는 비활성) */
 if (process.env.SHOOTER_TEST_HOOKS === "1") {
@@ -92,6 +137,7 @@ function roomState(room) {
     host: room.host,
     status: room.status,
     mapId: room.mapId || "center",
+    difficulty: room.difficulty || "normal",
     players: room.players.map(p => ({
       socketId: p.socketId,
       nickname: p.nickname,
@@ -155,7 +201,8 @@ function inSiteZone(p, map) {
   return null;
 }
 
-function resetBotRound(me, round) {
+function resetBotRound(me, round, difficulty) {
+  const cfg = BOT_DIFFICULTY[normalizeDifficulty(difficulty)];
   me._bot = {
     site: me.x < 0 ? "A" : "B",
     wpIdx: 0,
@@ -166,8 +213,11 @@ function resetBotRound(me, round) {
     nudgeT: 0,
     lastX: me.x,
     lastZ: me.z,
-    // AI 난이도: 반응 시간 + 조준 오차 (봇별 랜덤 0.6~1.0)
-    skill: 0.6 + Math.random() * 0.4,
+    // AI 난이도: 반응 시간 + 조준 오차 + 사격 빈도
+    skill: cfg.skill[0] + Math.random() * (cfg.skill[1] - cfg.skill[0]),
+    reactScale: cfg.react,
+    fireScale: cfg.fire,
+    aimScale: cfg.aim,
     reactUntil: 0,
     engagedAt: 0,
     reactJitter: Math.random() * 0.3,
@@ -183,7 +233,7 @@ function stepBot(room, botId) {
   const me = m.getPlayer(botId);
   if (!me) return;
 
-  if (me._botRound !== m.round) resetBotRound(me, m.round);
+  if (me._botRound !== m.round) resetBotRound(me, m.round, room.difficulty);
   const bot = me._bot;
   if (!bot) return;
 
@@ -303,7 +353,7 @@ function stepBot(room, botId) {
   let pitch = me.pitch;
   let firing = false;
 
-  const reactDelay = 0.35 + (1 - bot.skill) * 0.45; // 숙련도 낮을수록 늦은 반응
+  const reactDelay = (0.35 + (1 - bot.skill) * 0.45) * (bot.reactScale || 1); // 숙련도/난이도별 반응
 
   // 적을 처음 인식하면 그 순간부터 반응 딜레이 시작 (즉시 조준·사격 방지)
   if (target && los && !bot.engagedAt) bot.engagedAt = now;
@@ -312,12 +362,12 @@ function stepBot(room, botId) {
   if (target && los) {
     // 반응 시간 경과 전에는 조준도 못함 (처음 보자마자 즉시 조준 불가)
     if (now >= (bot.engagedAt ? bot.engagedAt + reactDelay + (bot.reactJitter || 0) : 0)) {
-      const aimErr = Math.min(0.22, 0.02 + bestD * 0.0022 + (1 - bot.skill) * 0.03);
+      const aimErr = Math.min(0.30, (0.02 + bestD * 0.0022 + (1 - bot.skill) * 0.03) * (bot.aimScale || 1));
       const jitter = () => (Math.random() - 0.5) * 2 * aimErr;
       yaw = Math.atan2(target.x - me.x, target.z - me.z) + jitter() * 0.8;
       pitch = Math.atan2((target.y + 1.0) - 1.6, bestD) + jitter() * 0.7;
       // 사격: 연사 시 정확도 급감 + 반응 딜레이 후 점사
-      const canShoot = now >= bot.nextShotT && bestD < 42 && Math.random() < 0.6 * bot.skill;
+      const canShoot = now >= bot.nextShotT && bestD < 42 && Math.random() < 0.6 * bot.skill * (bot.fireScale || 1);
       if (canShoot) {
         firing = true;
         bot.burstLeft = 2 + Math.floor(Math.random() * 2);
@@ -378,29 +428,139 @@ function runBots(room) {
   }
 }
 
+function transferHost(room, oldSocketId) {
+  if (room.host !== oldSocketId) return;
+  const next = room.players.find(p => p.connected && !p.isBot);
+  room.host = next ? next.socketId : null;
+}
+
+function removePlayerFromRoom(room, player) {
+  if (!room || !player) return;
+  const idx = room.players.findIndex(p => p.socketId === player.socketId);
+  if (idx !== -1) room.players.splice(idx, 1);
+  if (room.match) room.match.removePlayer(player.socketId);
+  transferHost(room, player.socketId);
+
+  if (humanCount(room) < 1 && !hasPendingSession(room)) {
+    ROOMS.delete(room.id);
+    return;
+  }
+  broadcastLobby(room);
+  // 혼자 남으면 봇 재보충 (대기 상태에서만 — 진행 중 경기는 그대로 두어 팀 성립 유지)
+  if (room.status === "lobby" && humanCount(room) < 2) fillBots(room);
+}
+
 function leaveRoom(socket, room) {
   if (!room) return;
-  const idx = room.players.findIndex(p => p.socketId === socket.id);
-  if (idx !== -1) room.players.splice(idx, 1);
-
-  if (room.match) room.match.removePlayer(socket.id);
-
-  if (room.host === socket.id) {
-    const next = room.players.find(p => p.connected && !p.isBot);
-    room.host = next ? next.socketId : null;
-  }
+  const player = room.players.find(p => p.socketId === socket.id);
+  clearSession(socket);
+  removePlayerFromRoom(room, player);
 
   socket.leave(room.id);
   socket.data.roomId = null;
   socket.data.role = null;
+}
 
-  if (humanCount(room) < 1) {
-    ROOMS.delete(room.id);
+function suspendRoom(socket) {
+  const room = ROOMS.get(socket.data.roomId);
+  if (!room) return;
+  const player = room.players.find(p => p.socketId === socket.id);
+  if (!player) return;
+
+  // 즉시 삭제하지 않고 60초 유예. 같은 세션 토큰으로 돌아오면 경기 상태를 이어간다.
+  player.connected = false;
+  player.disconnectedAt = Date.now();
+  transferHost(room, socket.id);
+  socket.leave(room.id);
+  socket.data.roomId = null;
+  socket.data.role = null;
+
+  const token = socket.data.sessionToken;
+  socket.data.sessionToken = null;
+  if (!token) {
+    removePlayerFromRoom(room, player);
+    return;
+  }
+  const entry = SESSIONS.get(token);
+  if (entry) {
+    entry.playerId = player.socketId;
+    entry.socketId = null;
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => expireSession(token), SESSION_TTL_MS);
+    if (entry.timer.unref) entry.timer.unref();
+  }
+  broadcastLobby(room);
+}
+
+function expireSession(token) {
+  const entry = SESSIONS.get(token);
+  if (!entry) return;
+  SESSIONS.delete(token);
+  const room = ROOMS.get(entry.roomId);
+  if (!room) return;
+  const player = room.players.find(p => p.socketId === entry.playerId && !p.connected);
+  if (!player) return;
+  removePlayerFromRoom(room, player);
+  console.log(`[SESSION EXPIRE] ${token.slice(0, 8)}… room=${room.id}`);
+}
+
+function resumeSession(socket, data) {
+  const token = String(data?.sessionToken || "");
+  const entry = SESSIONS.get(token);
+  if (!entry) {
+    socket.emit("session:resumed", { ok: false, reason: "세션이 만료되었습니다." });
+    return false;
+  }
+  const room = ROOMS.get(entry.roomId);
+  const player = room?.players.find(p => p.socketId === entry.playerId && !p.isBot);
+  if (!room || !player) {
+    SESSIONS.delete(token);
+    socket.emit("session:resumed", { ok: false, reason: "복구할 방을 찾을 수 없습니다." });
+    return false;
+  }
+  const existingSocket = io.sockets.sockets.get(player.socketId);
+  if (player.connected && existingSocket?.connected && player.socketId !== socket.id) {
+    socket.emit("session:resumed", { ok: false, reason: "이미 접속 중인 세션입니다." });
+    return false;
+  }
+
+  if (socket.data.roomId && socket.data.roomId !== room.id) {
+    leaveRoom(socket, ROOMS.get(socket.data.roomId));
+  }
+
+  const oldId = player.socketId;
+  if (room.match) room.match.replacePlayerId(oldId, socket.id);
+  player.socketId = socket.id;
+  player.connected = true;
+  delete player.disconnectedAt;
+  if (!room.host || room.host === oldId) room.host = socket.id;
+
+  socket.join(room.id);
+  socket.data.roomId = room.id;
+  socket.data.role = room.host === socket.id ? "host" : "member";
+  attachSession(socket, token, room.id, socket.id);
+
+  socket.emit("session:resumed", {
+    ok: true,
+    roomId: room.id,
+    status: room.status,
+    room: roomState(room),
+  });
+
+  if (room.status === "playing" && room.match) {
+    socket.emit("game:sync", {
+      roomId: room.id,
+      mapId: room.mapId,
+      map: room.match.map,
+      weapons: WEAPONS,
+      characters: CHARACTERS,
+    });
+    socket.emit("game:state", room.match.snapshot());
   } else {
     broadcastLobby(room);
-    // 혼자 남으면 봇 재보충 (대기 상태에서만 — 진행 중 경기는 그대로 두어 팀 성립 유지)
-    if (room.status === "lobby" && humanCount(room) < 2) fillBots(room);
   }
+  console.log(`[SESSION RESUME] ${room.id} ${oldId} -> ${socket.id}`);
+  return true;
 }
 
 /* =========================================================
@@ -538,6 +698,8 @@ io.on("connection", (socket) => {
     const nickname = String(data?.nickname || "플레이어").trim().slice(0, 16) || "플레이어";
     const charId = ["vanguard", "rush", "guard", "venom"].includes(data?.charId) ? data.charId : "vanguard";
     const mapId = MAPS[data?.mapId] ? data.mapId : "center";
+    const difficulty = normalizeDifficulty(data?.difficulty);
+    const token = sessionTokenFor(data);
     if (socket.data.roomId) {
       const old = ROOMS.get(socket.data.roomId);
       leaveRoom(socket, old);
@@ -550,6 +712,7 @@ io.on("connection", (socket) => {
       status: "lobby",
       players: [],
       mapId,
+      difficulty,
       match: createMatch(roomId, { mapId }),
       tickCount: 0,
     };
@@ -560,15 +723,17 @@ io.on("connection", (socket) => {
     socket.data.role = "host";
     room.players.push({ socketId: socket.id, nickname, team: "red", connected: true, charId });
     room.match.addPlayer({ id: socket.id, nickname, team: "red", charId });
+    attachSession(socket, token, roomId, socket.id);
 
-    socket.emit("lobby:created", { ok: true, roomId, room: roomState(room) });
-    console.log(`[ROOM CREATE] ${roomId} host=${nickname} map=${mapId} char=${charId}`);
+    socket.emit("lobby:created", { ok: true, roomId, sessionToken: token, room: roomState(room) });
+    console.log(`[ROOM CREATE] ${roomId} host=${nickname} map=${mapId} char=${charId} bot=${difficulty}`);
   });
 
   socket.on("lobby:join", (data) => {
     const roomId = String(data?.roomId || "").trim().toUpperCase();
     const nickname = String(data?.nickname || "플레이어").trim().slice(0, 16) || "플레이어";
     const charId = ["vanguard", "rush", "guard", "venom"].includes(data?.charId) ? data.charId : "vanguard";
+    const token = sessionTokenFor(data);
     const room = ROOMS.get(roomId);
     if (!room) {
       socket.emit("lobby:join", { ok: false, reason: "방을 찾을 수 없습니다." });
@@ -582,20 +747,32 @@ io.on("connection", (socket) => {
     socket.data.role = "member";
     room.players.push({ socketId: socket.id, nickname, team: teamFor(room), connected: true, charId });
     room.match.addPlayer({ id: socket.id, nickname, team: room.players[room.players.length - 1].team, charId });
+    attachSession(socket, token, roomId, socket.id);
 
-    socket.emit("lobby:join", { ok: true, roomId, room: roomState(room) });
+    socket.emit("lobby:join", { ok: true, roomId, sessionToken: token, room: roomState(room) });
     broadcastLobby(room);
 
     /* 게임이 진행 중이면 바로 참전 — 맵/무기 설정 동기화 */
     if (room.status === "playing") {
       if (humanCount(room) >= 2) clearBots(room);
-      socket.emit("game:sync", { mapId: room.mapId, map: room.match.map, weapons: WEAPONS, characters: CHARACTERS });
+      socket.emit("game:sync", { roomId: room.id, mapId: room.mapId, map: room.match.map, weapons: WEAPONS, characters: CHARACTERS });
     }
     console.log(`[ROOM JOIN] ${roomId} <- ${nickname} char=${charId}`);
   });
 
   socket.on("lobby:leave", () => {
     if (socket.data.roomId) leaveRoom(socket, ROOMS.get(socket.data.roomId));
+  });
+
+  socket.on("session:resume", (data) => {
+    resumeSession(socket, data);
+  });
+
+  socket.on("lobby:difficulty", (data) => {
+    const room = ROOMS.get(socket.data.roomId);
+    if (!room || room.host !== socket.id) return;
+    room.difficulty = normalizeDifficulty(data?.difficulty);
+    broadcastLobby(room);
   });
 
   socket.on("lobby:start", () => {
@@ -622,6 +799,7 @@ io.on("connection", (socket) => {
 
     io.to(room.id).emit("game:started", {
       ok: true,
+      roomId: room.id,
       mapId: room.mapId,
       map: room.match.map,
       weapons: WEAPONS,
@@ -675,7 +853,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log(`[DISCONNECT] ${socket.id}`);
-    if (socket.data.roomId) leaveRoom(socket, ROOMS.get(socket.data.roomId));
+    if (socket.data.roomId) suspendRoom(socket);
   });
 });
 

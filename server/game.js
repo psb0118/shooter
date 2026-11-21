@@ -405,6 +405,8 @@ function createPlayer(id, nickname, team, charId, spawnIndex, map) {
     spawnSlot: spawnIndex,   // 라운드 시작마다 같은 팀 내 고유 스폰 유지
     smokeReadyAt: 0,
     ultCharge: 0,
+    inputSeq: 0,
+    lastInputAt: 0,
   };
 }
 
@@ -585,6 +587,24 @@ function createMatch(roomId, opts) {
       match._playerMap.delete(id);
     },
 
+    /* 재접속: Socket.IO 소켓 id가 바뀌어도 경기 상태/스탯을 유지한다. */
+    replacePlayerId(oldId, newId) {
+      if (oldId === newId) return match._playerMap.get(oldId) || null;
+      const player = match._playerMap.get(oldId);
+      if (!player) return null;
+      match._playerMap.delete(oldId);
+      player.id = newId;
+      match._playerMap.set(newId, player);
+      const arr = match.teams[player.team];
+      const idx = arr.indexOf(oldId);
+      if (idx !== -1) arr[idx] = newId;
+      if (match.spike.carrierId === oldId) match.spike.carrierId = newId;
+      if (match.spike.plantingId === oldId) match.spike.plantingId = newId;
+      if (match.spike.defusingId === oldId) match.spike.defusingId = newId;
+      for (const pu of match.pendingUlts) if (pu.id === oldId) pu.id = newId;
+      return player;
+    },
+
     /* 매치 시작 (첫 라운드) */
     start() {
       match.startedAt = Date.now();
@@ -744,6 +764,9 @@ function createMatch(roomId, opts) {
         p.firing = next;
       }
       if (typeof data.ads === "boolean")   p.ads = data.ads;
+      // 입력 ack: 클라가 마지막으로 보낸 입력 순번을 스냅샷에 되돌려준다.
+      if (Number.isInteger(data.seq) && data.seq >= 0) p.inputSeq = data.seq;
+      p.lastInputAt = match._now();
     },
 
     /* ---- 구매: 가격 지불, 전투 직전 무기 변경 ---- */
@@ -1199,7 +1222,8 @@ function createMatch(roomId, opts) {
           speedMult: p.speedMult,
           x: p.x, y: p.y, z: p.z,
           yaw: p.yaw, pitch: p.pitch,
-          vy: p.vy,
+          vx: p.vx, vz: p.vz, vy: p.vy,
+          inputSeq: p.inputSeq || 0,
           hp: p.hp, maxHp: p.maxHp, alive: p.alive,
           kills: p.kills, deaths: p.deaths, assists: p.assists || 0,
           weapon: p.weapon, ammo: p.ammo,

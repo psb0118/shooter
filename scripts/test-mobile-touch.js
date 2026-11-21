@@ -9,6 +9,8 @@
 
 const { spawn } = require("child_process");
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 const puppeteer = require("puppeteer");
 
 const PORT = 3333;
@@ -51,6 +53,7 @@ async function roomState() {
     stdio: "ignore",
   });
   let browser;
+  let page;
   try {
     await waitForServer();
     try {
@@ -59,12 +62,12 @@ async function roomState() {
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       });
     } catch (e) {
-      // 로컬에 Chrome 시스템 라이브러리가 없을 때만 건너뛴다. CI에서는 반드시 실행한다.
-      if (process.env.CI) throw e;
+      // 로컬에 Chrome 시스템 라이브러리가 없을 때만 건너뛴다. CI/명시적 게이트에서는 반드시 실행한다.
+      if (process.env.CI || process.env.SHOOTER_REQUIRE_MOBILE_TEST === "1") throw e;
       console.warn(`\n[mobile-touch] Chrome 실행 불가로 건너뜀: ${e.message.split("\n")[0]}`);
       return;
     }
-    const page = await browser.newPage();
+    page = await browser.newPage();
     await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
     const errors = [];
     page.on("pageerror", e => errors.push(e.message));
@@ -211,6 +214,13 @@ async function roomState() {
   } catch (err) {
     console.error("\n[mobile-touch] 테스트 실패:", err.message);
     process.exitCode = 1;
+    // CI에서 실패 원인을 바로 볼 수 있도록 화면과 스택을 남긴다.
+    const artifactDir = path.join(__dirname, "..", "artifacts");
+    try { fs.mkdirSync(artifactDir, { recursive: true }); } catch {}
+    try { fs.writeFileSync(path.join(artifactDir, "mobile-touch-failure.log"), String(err.stack || err.message)); } catch {}
+    if (page) {
+      try { await page.screenshot({ path: path.join(artifactDir, "mobile-touch-failure.png"), fullPage: true }); } catch {}
+    }
   } finally {
     if (browser) await browser.close();
     server.kill();

@@ -46,12 +46,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const b = await connect("B");
 
     /* A 방 생성 */
-    a.emit("lobby:create", { nickname: "알파" });
+    a.emit("lobby:create", { nickname: "알파", difficulty: "hard" });
     const created = await once(a, "lobby:created");
     assert(created.ok, "lobby:created ok");
     const roomId = created.room.roomId;
     assert.equal(created.room.host, a.id, "A가 방장");
-    ok(`방 생성 (${roomId})`);
+    assert.equal(created.room.difficulty, "hard", "봇 난이도 생성값 유지");
+    ok(`방 생성 (${roomId}, bot=hard)`);
 
     /* A 시작 (혼자) → 5v5 봇 보충 */
     const startedA = once(a, "game:started");
@@ -70,6 +71,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const carrier = gs.state.players.find(p => p.hasSpike);
     assert(carrier && carrier.team === "red", "공격(레드) 캐리어 보유");
     ok("혼자 시작 → 5v5 & 캐리어 배정");
+
+    /* 입력 seq ack — 클라 재조정 기준 */
+    a.emit("game:input", { seq: 7, keys: {}, yaw: 0, pitch: 0, firing: false });
+    let ackMe = null;
+    for (let i = 0; i < 6; i++) {
+      const ackSnap = await once(a, "game:state");
+      ackMe = ackSnap.players.find(p => p.id === a.id);
+      if (ackMe && ackMe.inputSeq >= 7) break;
+    }
+    assert(ackMe && ackMe.inputSeq >= 7, `입력 seq ack (${ackMe ? ackMe.inputSeq : "?"})`);
+    assert(typeof ackMe.vx === "number" && typeof ackMe.vz === "number", "재조정 속도 필드");
+    ok("입력 seq ack/재조정 필드");
 
     /* 구매 단계: 자금 부족 AR 구매 거부, 권총 재구매 허용 */
     const moneyStart = (await once(a, "game:state")).players.find(p => p.id === a.id).money;
