@@ -368,7 +368,15 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; f
 #end-score { font-size: 22px; color: #9aa5b5; margin-bottom: 6px; }
 
 /* ==================== 모바일 터치 컨트롤 ==================== */
-html, body { touch-action: none; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+html { touch-action: auto; }
+body { touch-action: none; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+/* 로비는 세로 터치 스크롤을 허용한다. (게임 화면은 body의 none 유지) */
+body.lobby-open { touch-action: auto; overscroll-behavior-y: contain; }
+body.lobby-open #lobby, body.lobby-open .lobby-shell { touch-action: pan-y; }
+/* 구매/설정 모달 내부도 터치 스크롤을 허용한다. */
+body.modal-open { touch-action: auto; overscroll-behavior-y: contain; }
+body.modal-open #weapon-select, body.modal-open .ws-box,
+body.modal-open #pause, body.modal-open .pause-box { touch-action: pan-y; }
 #game-canvas { touch-action: none; }
 
 #touch-controls {

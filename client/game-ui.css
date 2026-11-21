@@ -202,9 +202,16 @@
   background: linear-gradient(90deg, #fff, #9fd8ff);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
+.ws-head-right { display: flex; align-items: flex-end; gap: 10px; flex: none; }
 .ws-wallet { text-align: right; flex: none; }
 .ws-wallet span { display: block; font-size: 8px; letter-spacing: 2px; color: #6f829e; font-weight: 800; }
 .ws-wallet b { font-size: 26px; color: #ffd75f; letter-spacing: 1px; }
+.ws-close {
+  width: 34px; height: 34px; flex: none; cursor: pointer;
+  border: 1px solid rgba(255, 93, 122, .45); background: rgba(40, 8, 16, .75);
+  color: #ff9bad; font: 800 16px/1 inherit; padding: 0;
+}
+.ws-close:hover { background: rgba(80, 14, 26, .9); border-color: #ff5d7a; }
 .ws-sub { text-align: left; color: #7f91ab; font-size: 10px; letter-spacing: .4px; margin: 10px 0 14px; }
 .ws-sub b { color: #5fe7ff; }
 
@@ -304,6 +311,12 @@
 .end-box h2 { font-size: 34px; letter-spacing: 3px; }
 #end-score { color: #5fe7ff; letter-spacing: 2px; }
 
+/* 터치 기기(가로 모드 포함): PC용 스킬 카드/키 안내 대신 터치 버튼만 사용한다. */
+body.mobile-ui #skill-hud { display: none; }
+body.mobile-ui .setting-row.keys { display: none; }
+body.mobile-ui .ws-box { width: 94vw; }
+body.mobile-ui #ws-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
 @media (max-width: 760px) {
   #scoreboard { transform: translateX(-50%) scale(.82); transform-origin: top center; }
   #healthbar-wrap { width: 200px; }
@@ -327,3 +340,42 @@
 }
 
 body.lefty-ui #skill-hud { left: 18px; right: auto; }
+
+/* 가로 모드 휴대폰: 세로 기준 위치가 화면 밖으로 밀리지 않도록 압축 배치. */
+@media (max-height: 520px) {
+  #scoreboard { transform: translateX(-50%) scale(.72); transform-origin: top center; }
+  #money-wrap { transform: scale(.8); transform-origin: top right; }
+  #my-team-tag { transform: scale(.8); transform-origin: top left; }
+  #healthbar-wrap { width: 180px; bottom: 12px; }
+  #kd { bottom: 66px; }
+  #weapon-hud { min-width: 138px; right: 14px; bottom: 12px; padding: 6px 10px 7px; }
+  #ammo { font-size: 24px; }
+  #btn-menu { top: calc(54px + var(--safe-t)); left: calc(14px + var(--safe-l)); width: 38px; height: 38px; }
+  #joy-base { left: calc(18px + var(--safe-l)); bottom: calc(112px + var(--safe-b)); width: 88px; height: 88px; }
+  #joy-knob { width: 38px; height: 38px; margin: -19px 0 0 -19px; }
+  #btn-fire { right: calc(16px + var(--safe-r)); bottom: calc(92px + var(--safe-b)); width: 66px; height: 66px; font-size: 28px; }
+  #btn-reload { right: calc(22px + var(--safe-r)); bottom: calc(164px + var(--safe-b)); width: 44px; height: 44px; font-size: 18px; }
+  #btn-swap { right: calc(88px + var(--safe-r) + var(--ctl-gap)); bottom: calc(92px + var(--safe-b)); width: 44px; height: 44px; font-size: 18px; }
+  #btn-interact { right: calc(88px + var(--safe-r) + var(--ctl-gap)); bottom: calc(164px + var(--safe-b)); width: 48px; height: 48px; font-size: 20px; }
+  #btn-smoke { right: calc(72px + var(--safe-r) + var(--ctl-gap)); bottom: calc(224px + var(--safe-b)); width: 48px; height: 48px; }
+  #btn-ult { right: calc(16px + var(--safe-r)); bottom: calc(224px + var(--safe-b)); width: 48px; height: 48px; }
+  .btn-skill .btn-skill-key { font-size: 13px; }
+  .btn-skill .btn-skill-name { font-size: 6px; }
+  .btn-skill-cd { font-size: 10px; }
+  #touch-controls.lefty #joy-base { left: auto; right: calc(18px + var(--safe-r)); }
+  #touch-controls.lefty #btn-menu { left: auto; right: calc(14px + var(--safe-r)); }
+  #touch-controls.lefty #btn-fire { right: auto; left: calc(16px + var(--safe-l)); }
+  #touch-controls.lefty #btn-reload { right: auto; left: calc(22px + var(--safe-l)); }
+  #touch-controls.lefty #btn-swap { right: auto; left: calc(88px + var(--safe-l) + var(--ctl-gap)); }
+  #touch-controls.lefty #btn-interact { right: auto; left: calc(88px + var(--safe-l) + var(--ctl-gap)); }
+  #touch-controls.lefty #btn-smoke { right: auto; left: calc(72px + var(--safe-l) + var(--ctl-gap)); }
+  #touch-controls.lefty #btn-ult { right: auto; left: calc(16px + var(--safe-l)); }
+  /* 가로 모드에서는 하단 HUD와 겹치지 않도록 스킬 버튼을 낮춘다. */
+  #skill-hud { bottom: 180px; }
+  .ws-box { max-height: 94vh; padding: 14px 14px 10px; }
+  .ws-box h2 { font-size: 22px; }
+  .ws-wallet b { font-size: 20px; }
+  .ws-sub { margin: 7px 0 9px; }
+  .ws-foot { margin-top: 7px; padding-top: 5px; }
+  .ws-close { top: 10px; right: 10px; }
+}

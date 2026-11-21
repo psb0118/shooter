@@ -36,8 +36,12 @@ const $ = (sel) => document.querySelector(sel);
 /* 모바일 기기 감지 — 터치스크린이 달린 PC/노트북(pointer: fine + 마우스 주 입력)은
    데스크톱으로 취급해 모바일 UI를 띄우지 않는다. */
 const IS_PRIMARY_TOUCH = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+const IS_ANY_TOUCH = !!(window.matchMedia && window.matchMedia("(any-pointer: coarse)").matches);
+const IS_HOVER_NONE = !!(window.matchMedia && window.matchMedia("(hover: none)").matches);
 const IS_TOUCH_UA = /Android|iPhone|iPad|iPod|Mobi|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-const TOUCH = ("ontouchstart" in window || navigator.maxTouchPoints > 0) && (IS_PRIMARY_TOUCH || IS_TOUCH_UA);
+const IS_TOUCH_CAPABLE = "ontouchstart" in window || navigator.maxTouchPoints > 0 || IS_ANY_TOUCH;
+// 데스크톱 사이트 모드/일부 WebView에서도 좁은 터치 화면이면 모바일 UI를 유지한다.
+const TOUCH = IS_TOUCH_CAPABLE && (IS_PRIMARY_TOUCH || IS_HOVER_NONE || IS_TOUCH_UA || navigator.userAgentData?.mobile === true || (window.innerWidth <= 900 && (IS_ANY_TOUCH || navigator.maxTouchPoints > 0)));
 
 /* ================= 전역 상태 ================= */
 
@@ -1132,10 +1136,12 @@ document.addEventListener("pointerlockchange", () => {
     if (state.inGame && state.alive && !state.uiLock && !buyUIOpen() && $("#end-screen").classList.contains("hidden") && !state.planting && !state.defusing && state.phase === "combat") {
       // 전투 중 락 해제(ESC) 시 설정 탭 표시
       syncSettingsUI();
+      setModalScroll(true);
       $("#pause").classList.remove("hidden");
     }
   } else {
     $("#pause").classList.add("hidden");
+    setModalScroll(false);
     // 락을 획득한 바로 그 클릭이 마우스를 누른 채면 즉시 발사 시작 (첫 클릭부터 발사 가능)
     if (state.inGame && !state.uiLock) {
       if (heldFire) { state.firing = true; flushInput(); }
@@ -1255,11 +1261,13 @@ applyControlSettings();
 $("#btn-resume").addEventListener("click", () => {
   $("#pause").classList.add("hidden");
   state.uiLock = false;
+  setModalScroll(false);
   if (!TOUCH) tryLock();
 });
 $("#btn-leave").addEventListener("click", () => {
   $("#pause").classList.add("hidden");
   state.uiLock = false;
+  setModalScroll(false);
   socket.emit("lobby:leave");
   enterLobbyUI();
 });
@@ -1267,6 +1275,7 @@ function openPauseSettings() {
   if (!state.inGame) return;
   syncSettingsUI();
   state.uiLock = true;
+  setModalScroll(true);
   $("#pause").classList.remove("hidden");
 }
 
@@ -1326,8 +1335,13 @@ function updateJoy(t) {
   state.keys.shift = len > JOY_R * 0.8;
 }
 
+function modalVisible() {
+  return !$("#weapon-select").classList.contains("hidden") ||
+    !$("#pause").classList.contains("hidden");
+}
+
 document.addEventListener("touchstart", (e) => {
-  if (!state.inGame || state.uiLock) return;
+  if (!state.inGame || state.uiLock || modalVisible()) return;
   e.preventDefault();
   for (const t of e.changedTouches) {
     if (t.target.closest("#joy-base")) {
@@ -1354,7 +1368,9 @@ document.addEventListener("touchstart", (e) => {
 }, { passive: false });
 
 document.addEventListener("touchmove", (e) => {
-  if (!state.inGame) return;
+  if (!state.inGame || state.uiLock || modalVisible()) return;
+  // 오버레이/모달이 아닐 때만 게임 시야 회전을 위해 기본 스크롤을 막는다.
+  if (!joy.active && !look.active) return;
   e.preventDefault();
   for (const t of e.changedTouches) {
     if (joy.active && t.identifier === joy.id) updateJoy(t);
@@ -1397,6 +1413,7 @@ document.addEventListener("touchcancel", (e) => {
 });
 
 function initTouchUI() {
+  document.body.classList.toggle("mobile-ui", TOUCH);
   if (!TOUCH) return;
   // 구매 화면 플립 현상 방지를 위해 스크롤 잠금
   document.body.style.overscrollBehavior = "none";
@@ -1408,6 +1425,7 @@ function openBuyUI() {
   if (state.phase !== "buy") return;
   if ($("#weapon-select").classList.contains("hidden")) {
     state.uiLock = true;
+    setModalScroll(true);
     $("#weapon-select").classList.remove("hidden");
     $("#pause").classList.add("hidden");
     exitLock();
@@ -1418,7 +1436,9 @@ function openBuyUI() {
 function closeBuyUI(relock) {
   $("#weapon-select").classList.add("hidden");
   state.uiLock = false;
-  if (relock !== false && state.inGame) tryLock();
+  setModalScroll(false);
+  // 터치 기기에서는 포인터 락을 요청하지 않는다.
+  if (relock !== false && state.inGame && !TOUCH) tryLock();
 }
 
 function refreshBuyGrid() {
@@ -1770,6 +1790,8 @@ function renderLobby(room) {
 }
 
 function enterLobby(room) {
+  setLobbyOpen(true);
+  setModalScroll(false);
   state.inGame = false;
   // 버그: 로비 재진입 시 이전 라운드의 맵/벽/사이트/플레이어 메시가 남아 중첩됐다 — 씬 정리 선행
   clearWorldObjects();
@@ -1863,6 +1885,8 @@ socket.on("game:started", (d) => {
     defuseProgress: 0,
   };
   buildWorld(d.map);
+  setLobbyOpen(false);
+  setModalScroll(false);
   $("#lobby").classList.add("hidden");
   $("#touch-controls").classList.toggle("hidden", !TOUCH);
   $("#hud").classList.remove("hidden");
@@ -1890,6 +1914,8 @@ socket.on("game:sync", (d) => {
   camera.fov = 75;
   camera.updateProjectionMatrix();
   buildWorld(d.map);
+  setLobbyOpen(false);
+  setModalScroll(false);
   $("#lobby").classList.add("hidden");
   $("#hud").classList.remove("hidden");
   $("#touch-controls").classList.toggle("hidden", !TOUCH);
@@ -2210,6 +2236,7 @@ $("#btn-join").addEventListener("click", () => {
   });
 });
 $("#btn-start").addEventListener("click", () => socket.emit("lobby:start"));
+$("#ws-close").addEventListener("click", () => closeBuyUI());
 $("#btn-back-lobby").addEventListener("click", () => {
   socket.emit("lobby:leave");
   enterLobbyUI();
@@ -2217,16 +2244,41 @@ $("#btn-back-lobby").addEventListener("click", () => {
 $("#pause").addEventListener("click", (e) => {
   if (e.target === $("#pause")) {
     $("#pause").classList.add("hidden");
-    tryLock();
+    setModalScroll(false);
+    if (!TOUCH) tryLock();
   }
 });
 
+function setLobbyOpen(open) {
+  document.body.classList.toggle("lobby-open", open);
+  if (open) setModalScroll(false);
+}
+
+function setModalScroll(open) {
+  document.body.classList.toggle("modal-open", open);
+}
+
+// 오버레이가 어떤 경로로 열리/닫히든 모달 내부 터치 스크롤 상태를 동기화한다.
+function syncModalScroll() {
+  const open = !$("#weapon-select").classList.contains("hidden") ||
+    !$("#pause").classList.contains("hidden");
+  setModalScroll(open);
+}
+new MutationObserver(syncModalScroll).observe(document.body, {
+  attributes: true, attributeFilter: ["class"], subtree: true,
+});
+syncModalScroll();
+
 function enterLobbyUI() {
+  setLobbyOpen(true);
+  setModalScroll(false);
   state.inGame = false;
   // 버그: (btn-leave / btn-back-lobby) 로비 복귀 시 미정리된 3D 오브젝트가 다음 라운드에 중첩됐다
   clearWorldObjects();
   $("#end-screen").classList.add("hidden");
   $("#weapon-select").classList.add("hidden");
+  $("#pause").classList.add("hidden");
+  $("#touch-controls").classList.add("hidden");
   $("#hud").classList.add("hidden");
   $("#lobby").classList.remove("hidden");
   $("#lobby").classList.remove("in-room");
@@ -2482,6 +2534,7 @@ function showHitMarker() {
 /* ------------- 초기화 ------------- */
 
 initTouchUI();
+setLobbyOpen(true);
 const nick = localStorage.getItem("shooter_nick") || "";
 if (nick) $("#nickname").value = nick;
 $("#nickname").addEventListener("change", (e) => localStorage.setItem("shooter_nick", e.target.value.trim()));

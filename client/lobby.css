@@ -4,7 +4,9 @@
 
 #lobby.lobby-screen {
   display: block;
+  height: 100%;
   overflow: hidden;
+  touch-action: pan-y;
   background: #05070d;
   z-index: 40;
   --hud-cyan: #5fe7ff;
@@ -52,9 +54,13 @@
 
 .lobby-shell {
   position: relative; z-index: 2;
-  height: 100%; padding: 18px 24px 12px;
+  height: 100%; min-height: 0; padding: 18px 24px 12px;
+  height: 100dvh;
   display: flex; flex-direction: column; gap: 12px;
   overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   scrollbar-width: thin; scrollbar-color: rgba(95, 231, 255, .35) transparent;
 }
 
@@ -310,8 +316,8 @@
 }
 
 @media (max-width: 980px) {
-  .lobby-shell { height: auto; min-height: 100%; }
-  .lobby-main { grid-template-columns: 220px minmax(0, 1fr); }
+  .lobby-shell { min-height: 0; }
+  .lobby-main { flex: 0 0 auto; min-height: auto; grid-template-columns: 220px minmax(0, 1fr); }
   .lobby-deploy { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .lobby-deploy > .panel-label { grid-column: 1 / -1; margin-bottom: 0; }
   .deploy-form { grid-column: 1; }
@@ -368,6 +374,26 @@
 
 @media (max-width: 980px) {
   .brief-card { grid-column: 1 / -1; flex: none; }
+}
+
+/* 터치 기기는 화면 폭과 관계없이(특히 가로 모드) 모바일 로비를 사용한다. */
+body.mobile-ui .lobby-main {
+  display: flex; flex-direction: column; flex: 0 0 auto; min-height: 0; gap: 10px;
+}
+body.mobile-ui .lobby-agents { order: 1; }
+body.mobile-ui .lobby-deploy {
+  order: 2; display: flex; flex-direction: column; gap: 10px;
+  overflow: visible;
+}
+body.mobile-ui .lobby-deploy > .panel-label { margin-bottom: 0; }
+body.mobile-ui .agent-showcase { order: 3; min-height: 300px; }
+body.mobile-ui .lobby-footer { display: none; }
+body.mobile-ui .season-pill { display: none; }
+body.mobile-ui .lobby-shell {
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  padding-right: calc(12px + env(safe-area-inset-right, 0px));
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  padding-left: calc(12px + env(safe-area-inset-left, 0px));
 }
 
 @media (max-width: 480px) {
