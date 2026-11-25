@@ -99,7 +99,7 @@ const state = {
   roomId: null,
   roomHost: null,
   sessionToken: null,
-  perf: { frames: 0, elapsed: 0, fps: 60, renderScale: 1 },
+  perf: { frames: 0, elapsed: 0, fps: 60, renderScale: 1, lowQuality: false, lowStreak: 0 },
   cam: { fov: 75 },
   viewmodel: null,
   lastViewModel: null,
@@ -237,8 +237,18 @@ const MAX_PIXEL_RATIO = TOUCH ? 1.5 : 2;
 let renderScale = 1;
 function applyRenderScale() {
   const base = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
-  renderer.setPixelRatio(Math.max(0.65, base * renderScale));
+  const minPixelRatio = state.perf.lowQuality ? 0.5 : 0.65;
+  renderer.setPixelRatio(Math.max(minPixelRatio, base * renderScale));
   state.perf.renderScale = renderScale;
+}
+
+// 저사양 모드: 시야를 가리지 않는 장식 라인/링/라벨과 보조 조명만 끈다.
+function applyQuality(low) {
+  if (fillLight) fillLight.visible = !low;
+  for (const o of state.mapObjects) {
+    o.visible = !(low && (o.isLineSegments || o.isSprite || o.isPointLight ||
+      (o.isMesh && o.material?.transparent)));
+  }
 }
 applyRenderScale();
 if (THREE.ACESFilmicToneMapping) {
@@ -613,6 +623,7 @@ function buildWorld(map) {
     scene.add(label);
     state.mapObjects.push(label);
   }
+  applyQuality(state.perf.lowQuality);
 }
 
 function clearWorldObjects() {
@@ -676,16 +687,25 @@ function makePlayerMesh(p) {
   });
   const cyl = (rt, rb, h, seg, mat) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
 
-  // 다리 / 무릎·정강이 플레이트 / 부츠 — 피부가 드러나는 부분 없이 전술화한다.
+  // 다리 — 힙과 무릎을 피벗으로 나눠 보행 시 실제로 흔들리게 한다.
+  const legRig = {};
   for (const sx of [-0.17, 0.17]) {
-    const thigh = cyl(0.13, 0.15, 0.3, 10, darkMat); thigh.position.set(sx, 0.6, 0);
-    const thighPlate = meshBox(0.18, 0.24, 0.16, armorMat); thighPlate.position.set(sx, 0.62, 0.08);
-    const shin = cyl(0.095, 0.12, 0.34, 10, darkMat); shin.position.set(sx, 0.28, 0);
-    const shinPlate = meshBox(0.19, 0.3, 0.16, armorMat); shinPlate.position.set(sx, 0.3, 0.075);
-    const knee = meshBox(0.19, 0.1, 0.21, plateMat); knee.position.set(sx, 0.47, 0.075);
-    const boot = meshBox(0.22, 0.13, 0.35, darkMat); boot.position.set(sx, 0.065, 0.06);
-    const bootCap = meshBox(0.18, 0.06, 0.18, plateMat); bootCap.position.set(sx, 0.1, 0.1);
-    group.add(thigh, thighPlate, shin, shinPlate, knee, boot, bootCap);
+    const leg = new THREE.Group();
+    leg.position.set(sx, 0.72, 0);
+    const thigh = cyl(0.13, 0.15, 0.3, 10, darkMat); thigh.position.y = -0.12;
+    const thighPlate = meshBox(0.18, 0.24, 0.16, armorMat); thighPlate.position.set(0, -0.1, 0.08);
+    const lower = new THREE.Group();
+    lower.position.y = -0.25;
+    const knee = meshBox(0.19, 0.1, 0.21, plateMat); knee.position.set(0, 0, 0.075);
+    const shin = cyl(0.095, 0.12, 0.34, 10, darkMat); shin.position.y = -0.19;
+    const shinPlate = meshBox(0.19, 0.3, 0.16, armorMat); shinPlate.position.set(0, -0.17, 0.075);
+    const boot = meshBox(0.22, 0.13, 0.35, darkMat); boot.position.set(0, -0.405, 0.06);
+    const bootCap = meshBox(0.18, 0.06, 0.18, plateMat); bootCap.position.set(0, -0.37, 0.1);
+    lower.add(knee, shin, shinPlate, boot, bootCap);
+    leg.add(thigh, thighPlate, lower);
+    group.add(leg);
+    if (sx < 0) { legRig.leftLeg = leg; legRig.leftKnee = lower; }
+    else { legRig.rightLeg = leg; legRig.rightKnee = lower; }
   }
 
   // 힙 / 몸통 / 가슴 플레이트
@@ -709,6 +729,9 @@ function makePlayerMesh(p) {
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
     return mesh;
   };
+  const armsRig = new THREE.Group();
+  armsRig.position.set(0, 1.2, 0.1);
+  group.add(armsRig);
   const rightShoulder = joint(0.36 * bulk, 1.24, 0);
   const rightElbow = joint(0.43 * bulk, 1.07, 0.08);
   const rightHand = joint(0.16, 1.0, 0.3);
@@ -720,17 +743,19 @@ function makePlayerMesh(p) {
     [-1, leftShoulder, leftElbow, leftHand],
   ]) {
     const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.145, 12, 10), armorMat);
-    shoulder.position.copy(shoulderPos); shoulder.scale.setScalar(bulk);
+    shoulder.position.copy(shoulderPos).sub(armsRig.position); shoulder.scale.setScalar(bulk);
     const pad = meshBox(0.24 * bulk, 0.09, 0.25, plateMat);
-    pad.position.copy(shoulderPos); pad.position.y += 0.07;
+    pad.position.copy(shoulderPos).sub(armsRig.position); pad.position.y += 0.07;
     const shoulderGlow = meshBox(0.09, 0.03, 0.12, accentMat);
-    shoulderGlow.position.copy(shoulderPos); shoulderGlow.position.z += 0.07;
+    shoulderGlow.position.copy(shoulderPos).sub(armsRig.position); shoulderGlow.position.z += 0.07;
     const upperArm = limb(shoulderPos, elbowPos, 0.065, 0.075, darkMat);
+    upperArm.position.sub(armsRig.position);
     const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), plateMat);
-    elbow.position.copy(elbowPos);
+    elbow.position.copy(elbowPos).sub(armsRig.position);
     const forearm = limb(elbowPos, handPos, 0.055, 0.07, armorMat);
-    const glove = meshBox(0.1, 0.1, 0.14, darkMat); glove.position.copy(handPos);
-    group.add(shoulder, pad, shoulderGlow, upperArm, elbow, forearm, glove);
+    forearm.position.sub(armsRig.position);
+    const glove = meshBox(0.1, 0.1, 0.14, darkMat); glove.position.copy(handPos).sub(armsRig.position);
+    armsRig.add(shoulder, pad, shoulderGlow, upperArm, elbow, forearm, glove);
   }
 
   // 목 / 완전 밀폐형 헬멧 / 좁은 바이저 — 얼굴과 피부를 노출하지 않는다.
@@ -775,9 +800,9 @@ function makePlayerMesh(p) {
   const gunGlow = meshBox(0.11, 0.02, 0.3, accentMat); gunGlow.position.set(0, 0.08, 0.03);
   gun.add(receiver, barrel, stock, mag, gunGlow);
   gun.scale.setScalar(0.86);
-  gun.position.set(0.02, 1.02, 0.4);
+  gun.position.set(0.02, 1.02, 0.4).sub(armsRig.position);
   gun.rotation.x = 0.02;
-  group.add(gun);
+  armsRig.add(gun);
 
   // 발밑 팀 링
   const teamRing = new THREE.Mesh(
@@ -802,7 +827,7 @@ function makePlayerMesh(p) {
   spikeSpr.visible = false;
   group.add(spikeSpr);
 
-  return { group, hpBar, spikeSpr };
+  return { group, hpBar, spikeSpr, rig: { ...legRig, arms: armsRig } };
 }
 
 function makeSpikeSprite() {
@@ -2179,7 +2204,7 @@ socket.on("game:state", (snap) => {
       mesh.group.position.set(p.x, 0, p.z);
       mesh.group.position.y = p.y || 0;
       mesh.group.rotation.y = p.yaw;
-      ent = { group: mesh.group, hpBar: mesh.hpBar, spikeSpr: mesh.spikeSpr, name: p.nickname, team: p.team, alive: p.alive !== false, target: { x: p.x, y: p.y || 0, z: p.z, yaw: p.yaw, hp: p.hp }, px: p.x, pz: p.z, pt: snap.t, vx: 0, vz: 0 };
+      ent = { group: mesh.group, hpBar: mesh.hpBar, spikeSpr: mesh.spikeSpr, rig: mesh.rig, name: p.nickname, team: p.team, alive: p.alive !== false, target: { x: p.x, y: p.y || 0, z: p.z, yaw: p.yaw, hp: p.hp }, px: p.x, pz: p.z, pt: snap.t, vx: 0, vz: 0 };
       state.players.set(p.id, ent);
     }
     if (ent.spikeSpr) ent.spikeSpr.visible = !!p.hasSpike && p.alive !== false;
@@ -2534,12 +2559,23 @@ function updatePerformance(dt) {
   perf.elapsed += dt;
   if (perf.elapsed < 2) return;
   perf.fps = perf.frames / perf.elapsed;
-  if (perf.fps < 48 && renderScale > 0.65) {
-    renderScale = Math.max(0.65, renderScale - 0.1);
+  const minScale = perf.lowQuality ? 0.4 : 0.65;
+  if (perf.fps < 48 && renderScale > minScale) {
+    renderScale = Math.max(minScale, renderScale - 0.1);
     applyRenderScale();
-  } else if (perf.fps > 57 && renderScale < 1) {
+  } else if (perf.fps > 57 && !perf.lowQuality && renderScale < 1) {
     renderScale = Math.min(1, renderScale + 0.05);
     applyRenderScale();
+  }
+  if (perf.fps < 45) {
+    perf.lowStreak += 1;
+    if (!perf.lowQuality && perf.lowStreak >= 2) {
+      perf.lowQuality = true;
+      applyQuality(true);
+      applyRenderScale();
+    }
+  } else if (perf.fps > 55) {
+    perf.lowStreak = 0;
   }
   perf.frames = 0;
   perf.elapsed = 0;
@@ -2611,10 +2647,25 @@ function animate(now) {
     if (ent.vx || ent.vz) { ex += ent.vx * extrap * 2; ez += ent.vz * extrap * 2; }
     g.position.x += (ex - g.position.x) * t;
     g.position.z += (ez - g.position.z) * t;
-    const moving = ent.alive && Math.hypot(ent.vx || 0, ent.vz || 0) > 0.6;
-    ent.walkPhase = (ent.walkPhase || 0) + dt * (moving ? 9 : 2);
-    const bob = Math.sin(ent.walkPhase) * (moving ? 0.022 : 0.006);
+    const speed = Math.hypot(ent.vx || 0, ent.vz || 0);
+    const moveAmt = ent.alive ? Math.min(1, speed / 4.5) : 0;
+    const moving = moveAmt > 0.12;
+    ent.walkPhase = (ent.walkPhase || 0) + dt * (moving ? 9.5 + speed * 0.5 : 2);
+    const phase = ent.walkPhase;
+    const stride = Math.sin(phase) * 0.5 * moveAmt;
+    if (ent.rig) {
+      ent.rig.leftLeg.rotation.x = stride;
+      ent.rig.rightLeg.rotation.x = -stride;
+      ent.rig.leftKnee.rotation.x = Math.max(0, -Math.sin(phase)) * 0.55 * moveAmt;
+      ent.rig.rightKnee.rotation.x = Math.max(0, Math.sin(phase)) * 0.55 * moveAmt;
+      // 소총을 든 팔은 크게 흔들지 않고 호흡/보폭에 맞춘 작은 흔들림만 준다.
+      ent.rig.arms.rotation.x = -0.012 + Math.sin(phase * 2) * 0.02 * moveAmt;
+      ent.rig.arms.rotation.z = Math.sin(phase) * 0.018 * moveAmt;
+    }
+    const bob = Math.sin(phase) * (0.006 + 0.016 * moveAmt);
     g.position.y += (ent.target.y + bob - g.position.y) * t;
+    g.rotation.x += (-0.04 * moveAmt - g.rotation.x) * t;
+    g.rotation.z += (Math.sin(phase) * 0.015 * moveAmt - g.rotation.z) * t;
     g.rotation.y += angDiff(ent.target.yaw, g.rotation.y) * t;
   }
 
