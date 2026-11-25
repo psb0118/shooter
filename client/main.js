@@ -644,68 +644,126 @@ function makeTxtSprite(text, color, size) {
 
 /* ------------- 리모트 플레이어 ------------- */
 
+const AGENT_ACCENT = {
+  vanguard: 0x58d7ff,
+  rush: 0xff8a5c,
+  guard: 0x6ef0b0,
+  venom: 0xb98cff,
+};
+
 function makePlayerMesh(p) {
   const group = new THREE.Group();
-  const teamCol = new THREE.Color(TEAM_COLOR[p.team]);
-  const pCol = new THREE.Color().setHSL(((p.playerColor || 0) % 360) / 360, 0.7, 0.6);
+  const charId = p.charId || "vanguard";
+  const teamCol = new THREE.Color(TEAM_COLOR[p.team] || TEAM_COLOR.blue);
+  const accentCol = new THREE.Color(AGENT_ACCENT[charId] || 0x7fe7ff);
+  const bulk = charId === "guard" ? 1.1 : charId === "rush" ? 0.94 : 1;
   const armorMat = new THREE.MeshStandardMaterial({
-    color: teamCol.clone().multiplyScalar(0.72), roughness: 0.55, metalness: 0.35,
+    color: teamCol.clone().lerp(new THREE.Color(0xffffff), 0.2).multiplyScalar(0.84),
+    roughness: 0.62, metalness: 0.22,
   });
-  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1b2430, roughness: 0.8, metalness: 0.2 });
+  const plateMat = new THREE.MeshStandardMaterial({
+    color: teamCol.clone().lerp(new THREE.Color(0xffffff), 0.38).multiplyScalar(0.92),
+    roughness: 0.5, metalness: 0.28,
+  });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a2330, roughness: 0.82, metalness: 0.12 });
   const accentMat = new THREE.MeshStandardMaterial({
-    color: pCol, roughness: 0.45, metalness: 0.35,
-    emissive: pCol.clone().multiplyScalar(0.35), emissiveIntensity: 1,
+    color: accentCol, roughness: 0.4, metalness: 0.35,
+    emissive: accentCol.clone().multiplyScalar(0.2), emissiveIntensity: 0.8,
   });
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xd8b28a, roughness: 0.9, metalness: 0 });
-  const visorMat = new THREE.MeshBasicMaterial({ color: 0x7fe7ff });
+  const visorMat = new THREE.MeshStandardMaterial({
+    color: accentCol.clone().lerp(new THREE.Color(0xffffff), 0.2),
+    emissive: accentCol, emissiveIntensity: 0.55, roughness: 0.22, metalness: 0.55,
+  });
   const cyl = (rt, rb, h, seg, mat) => new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
 
-  // 다리 / 부츠
+  // 다리 / 무릎·정강이 플레이트 / 부츠 — 피부가 드러나는 부분 없이 전술화한다.
   for (const sx of [-0.17, 0.17]) {
-    const leg = cyl(0.115, 0.14, 0.58, 8, darkMat);
-    leg.position.set(sx, 0.34, 0);
-    const boot = meshBox(0.23, 0.13, 0.34, darkMat);
-    boot.position.set(sx, 0.065, 0.06);
-    const knee = meshBox(0.2, 0.12, 0.22, armorMat);
-    knee.position.set(sx, 0.54, 0.05);
-    group.add(leg, boot, knee);
+    const thigh = cyl(0.13, 0.15, 0.3, 10, darkMat); thigh.position.set(sx, 0.6, 0);
+    const thighPlate = meshBox(0.18, 0.24, 0.16, armorMat); thighPlate.position.set(sx, 0.62, 0.08);
+    const shin = cyl(0.095, 0.12, 0.34, 10, darkMat); shin.position.set(sx, 0.28, 0);
+    const shinPlate = meshBox(0.19, 0.3, 0.16, armorMat); shinPlate.position.set(sx, 0.3, 0.075);
+    const knee = meshBox(0.19, 0.1, 0.21, plateMat); knee.position.set(sx, 0.47, 0.075);
+    const boot = meshBox(0.22, 0.13, 0.35, darkMat); boot.position.set(sx, 0.065, 0.06);
+    const bootCap = meshBox(0.18, 0.06, 0.18, plateMat); bootCap.position.set(sx, 0.1, 0.1);
+    group.add(thigh, thighPlate, shin, shinPlate, knee, boot, bootCap);
   }
 
   // 힙 / 몸통 / 가슴 플레이트
-  const hips = meshBox(0.46, 0.18, 0.3, darkMat); hips.position.y = 0.64;
-  const torso = cyl(0.27, 0.34, 0.58, 8, armorMat); torso.position.y = 0.96;
-  const chest = meshBox(0.56, 0.34, 0.32, armorMat); chest.position.set(0, 1.02, 0.07);
-  const chestGlow = meshBox(0.18, 0.22, 0.02, accentMat); chestGlow.position.set(0, 1.02, 0.24);
-  const belt = meshBox(0.48, 0.07, 0.31, accentMat); belt.position.y = 0.74;
-  group.add(hips, torso, chest, chestGlow, belt);
+  const hips = meshBox(0.48, 0.18, 0.3, darkMat); hips.position.y = 0.7;
+  const pelvisPlate = meshBox(0.34, 0.14, 0.06, plateMat); pelvisPlate.position.set(0, 0.67, 0.24);
+  const torso = cyl(0.22, 0.27, 0.58, 10, darkMat); torso.position.y = 1.04;
+  const chest = meshBox(0.56 * bulk, 0.38, 0.34, armorMat); chest.position.set(0, 1.08, 0.12);
+  const abdomen = meshBox(0.38, 0.2, 0.26, plateMat); abdomen.position.set(0, 0.82, 0.13);
+  const chestStripe = meshBox(0.07, 0.24, 0.03, accentMat); chestStripe.position.set(0, 1.08, 0.3);
+  const belt = meshBox(0.5, 0.06, 0.4, accentMat); belt.position.set(0, 0.78, 0.09);
+  const collar = cyl(0.15, 0.19, 0.12, 10, darkMat); collar.position.y = 1.34;
+  group.add(hips, pelvisPlate, torso, chest, abdomen, chestStripe, belt, collar);
 
-  // 어꺠 / 팔 / 장갑
-  for (const sx of [-1, 1]) {
-    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.125, 10, 8), armorMat);
-    shoulder.position.set(sx * 0.35, 1.2, 0);
-    const shoulderGlow = meshBox(0.1, 0.035, 0.12, accentMat);
-    shoulderGlow.position.set(sx * 0.35, 1.31, 0.03);
-    const arm = cyl(0.07, 0.085, 0.46, 8, darkMat);
-    arm.position.set(sx * 0.4, 0.93, 0.02);
-    arm.rotation.z = sx * 0.12;
-    const glove = meshBox(0.1, 0.11, 0.13, darkMat);
-    glove.position.set(sx * 0.42, 0.7, 0.06);
-    group.add(shoulder, shoulderGlow, arm, glove);
+  // 어깨 / 소총을 든 팔 / 장갑 — 손이 총의 그립과 핸드가드에 닿도록 관절을 잡는다.
+  const joint = (x, y, z) => new THREE.Vector3(x, y, z);
+  const limb = (a, b, rt, rb, mat) => {
+    const dir = new THREE.Vector3().subVectors(b, a);
+    const len = Math.max(0.01, dir.length());
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, len, 8), mat);
+    mesh.position.copy(a).add(b).multiplyScalar(0.5);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+    return mesh;
+  };
+  const rightShoulder = joint(0.36 * bulk, 1.24, 0);
+  const rightElbow = joint(0.43 * bulk, 1.07, 0.08);
+  const rightHand = joint(0.16, 1.0, 0.3);
+  const leftShoulder = joint(-0.36 * bulk, 1.24, 0);
+  const leftElbow = joint(-0.4 * bulk, 1.04, 0.13);
+  const leftHand = joint(-0.1, 0.99, 0.48);
+  for (const [side, shoulderPos, elbowPos, handPos] of [
+    [1, rightShoulder, rightElbow, rightHand],
+    [-1, leftShoulder, leftElbow, leftHand],
+  ]) {
+    const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.145, 12, 10), armorMat);
+    shoulder.position.copy(shoulderPos); shoulder.scale.setScalar(bulk);
+    const pad = meshBox(0.24 * bulk, 0.09, 0.25, plateMat);
+    pad.position.copy(shoulderPos); pad.position.y += 0.07;
+    const shoulderGlow = meshBox(0.09, 0.03, 0.12, accentMat);
+    shoulderGlow.position.copy(shoulderPos); shoulderGlow.position.z += 0.07;
+    const upperArm = limb(shoulderPos, elbowPos, 0.065, 0.075, darkMat);
+    const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), plateMat);
+    elbow.position.copy(elbowPos);
+    const forearm = limb(elbowPos, handPos, 0.055, 0.07, armorMat);
+    const glove = meshBox(0.1, 0.1, 0.14, darkMat); glove.position.copy(handPos);
+    group.add(shoulder, pad, shoulderGlow, upperArm, elbow, forearm, glove);
   }
 
-  // 목 / 헤드 / 헬멧 / 발광 바이저
-  const neck = cyl(0.09, 0.1, 0.12, 8, skinMat); neck.position.y = 1.3;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 10), skinMat); head.position.y = 1.48;
-  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.195, 12, 10), armorMat);
-  helmet.position.set(0, 1.51, -0.02); helmet.scale.y = 0.9;
-  const visor = meshBox(0.3, 0.1, 0.12, visorMat); visor.position.set(0, 1.48, 0.15);
-  const visorFrame = meshBox(0.34, 0.13, 0.02, darkMat); visorFrame.position.set(0, 1.48, 0.09);
-  group.add(neck, head, helmet, visor, visorFrame);
+  // 목 / 완전 밀폐형 헬멧 / 좁은 바이저 — 얼굴과 피부를 노출하지 않는다.
+  const neck = cyl(0.1, 0.12, 0.12, 10, darkMat); neck.position.y = 1.36;
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.195, 16, 12), armorMat);
+  helmet.position.set(0, 1.52, -0.01); helmet.scale.set(1.03, 1.02, 1.03);
+  const visorFrame = meshBox(0.29, 0.11, 0.06, darkMat); visorFrame.position.set(0, 1.54, 0.16);
+  const visor = meshBox(0.24, 0.06, 0.035, visorMat); visor.position.set(0, 1.545, 0.19);
+  const brow = meshBox(0.3, 0.055, 0.07, plateMat); brow.position.set(0, 1.61, 0.13);
+  const jaw = meshBox(0.22, 0.1, 0.09, plateMat); jaw.position.set(0, 1.43, 0.145);
+  const crest = meshBox(0.045, 0.025, 0.2, accentMat); crest.position.set(0, 1.7, -0.02);
+  for (const sx of [-1, 1]) {
+    const ear = cyl(0.06, 0.06, 0.045, 12, darkMat);
+    ear.rotation.z = Math.PI / 2; ear.position.set(sx * 0.19, 1.52, 0);
+    const earLight = cyl(0.035, 0.035, 0.05, 10, accentMat);
+    earLight.rotation.z = Math.PI / 2; earLight.position.set(sx * 0.215, 1.52, 0);
+    group.add(ear, earLight);
+  }
+  group.add(neck, helmet, visorFrame, visor, brow, jaw, crest);
 
-  // 백패 / 백팩 라이트
-  const pack = meshBox(0.4, 0.5, 0.2, darkMat); pack.position.set(0, 1.0, -0.27);
-  const packLight = meshBox(0.16, 0.04, 0.02, accentMat); packLight.position.set(0, 1.14, -0.38);
-  group.add(pack, packLight);
+  if (charId === "venom") {
+    for (const sx of [-1, 1]) {
+      const canister = cyl(0.035, 0.035, 0.13, 8, accentMat);
+      canister.position.set(sx * 0.12, 1.1, 0.23);
+      group.add(canister);
+    }
+  }
+
+  // 백팩 / 백팩 라이트
+  const pack = meshBox(0.4, 0.48, 0.18, darkMat); pack.position.set(0, 1.04, -0.26);
+  const packPlate = meshBox(0.32, 0.28, 0.04, armorMat); packPlate.position.set(0, 1.08, -0.36);
+  const packLight = meshBox(0.12, 0.04, 0.02, accentMat); packLight.position.set(0, 1.24, -0.385);
+  group.add(pack, packPlate, packLight);
 
   // 소총 (오른손)
   const gun = new THREE.Group();
@@ -716,7 +774,9 @@ function makePlayerMesh(p) {
   const mag = meshBox(0.07, 0.18, 0.1, darkMat); mag.position.set(0, -0.13, 0.02);
   const gunGlow = meshBox(0.11, 0.02, 0.3, accentMat); gunGlow.position.set(0, 0.08, 0.03);
   gun.add(receiver, barrel, stock, mag, gunGlow);
-  gun.position.set(0.34, 1.03, 0.28);
+  gun.scale.setScalar(0.86);
+  gun.position.set(0.02, 1.02, 0.4);
+  gun.rotation.x = 0.02;
   group.add(gun);
 
   // 발밑 팀 링
@@ -2551,7 +2611,10 @@ function animate(now) {
     if (ent.vx || ent.vz) { ex += ent.vx * extrap * 2; ez += ent.vz * extrap * 2; }
     g.position.x += (ex - g.position.x) * t;
     g.position.z += (ez - g.position.z) * t;
-    g.position.y += (ent.target.y - g.position.y) * t;
+    const moving = ent.alive && Math.hypot(ent.vx || 0, ent.vz || 0) > 0.6;
+    ent.walkPhase = (ent.walkPhase || 0) + dt * (moving ? 9 : 2);
+    const bob = Math.sin(ent.walkPhase) * (moving ? 0.022 : 0.006);
+    g.position.y += (ent.target.y + bob - g.position.y) * t;
     g.rotation.y += angDiff(ent.target.yaw, g.rotation.y) * t;
   }
 
